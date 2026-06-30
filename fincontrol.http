@@ -1,0 +1,122 @@
+### ============================================================
+### FinControl - Keycloak Auth Requests
+### Extensão: REST Client (humao.rest-client)
+### Atalho: Ctrl+Alt+R para enviar | Ctrl+Alt+E para trocar env
+### ============================================================
+
+# ── Variáveis de arquivo (estáticas) ────────────────────────
+@keycloak_base = http://localhost:8081
+@realm         = fincontrol
+@token_url     = {{keycloak_base}}/realms/{{realm}}/protocol/openid-connect/token
+
+# Client confidencial (backend / M2M)
+@backend_client_id     = fincontrol-backend
+@backend_client_secret = fincontrol-backend-secret-12345
+
+# Client público (SPA / testes interativos)
+@public_client_id = fincontrol-frontend
+
+
+### ── 1. Login — Usuário Comum ──────────────────────────────
+# @name login_user
+POST {{token_url}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password
+&client_id={{public_client_id}}
+&username=user.fincontrol
+&password=User@123456
+&scope=openid profile email
+
+
+### ── 2. Login — Admin ───────────────────────────────────────
+# @name login_admin
+POST {{token_url}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password
+&client_id={{public_client_id}}
+&username=admin.fincontrol
+&password=Admin@123456
+&scope=openid profile email
+
+
+### ── 3. Login — Contador ────────────────────────────────────
+# @name login_contador
+POST {{token_url}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password
+&client_id={{public_client_id}}
+&username=contador.fincontrol
+&password=Contador@123456
+&scope=openid profile email
+
+
+### ── 4. Login — ReadOnly ────────────────────────────────────
+# @name login_readonly
+POST {{token_url}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=password
+&client_id={{public_client_id}}
+&username=readonly.fincontrol
+&password=Readonly@123456
+&scope=openid profile email
+
+
+### ── 5. Service Account — client_credentials (M2M) ─────────
+# @name login_service
+POST {{token_url}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials
+&client_id={{backend_client_id}}
+&client_secret={{backend_client_secret}}
+&scope=openid
+
+
+### ── Tokens do login_user (execute o request 1 primeiro) ────
+@access_token  = {{login_user.response.body.access_token}}
+@refresh_token = {{login_user.response.body.refresh_token}}
+
+
+### ── 6. UserInfo — claims do usuário autenticado ────────────
+GET {{keycloak_base}}/realms/{{realm}}/protocol/openid-connect/userinfo
+Authorization: Bearer {{access_token}}
+
+
+### ── 7. Introspectar Token — validar assinatura e claims ────
+# REST Client codifica "client_id:client_secret" em Base64 automaticamente
+POST {{keycloak_base}}/realms/{{realm}}/protocol/openid-connect/token/introspect
+Content-Type: application/x-www-form-urlencoded
+Authorization: Basic {{backend_client_id}}:{{backend_client_secret}}
+
+token={{access_token}}
+
+
+### ── 8. Refresh Token ───────────────────────────────────────
+# @name refresh
+POST {{token_url}}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token
+&client_id={{public_client_id}}
+&refresh_token={{refresh_token}}
+
+
+### ── 9. JWKS — chaves públicas para validar JWT ─────────────
+GET {{keycloak_base}}/realms/{{realm}}/protocol/openid-connect/certs
+
+
+### ── 10. OpenID Discovery ───────────────────────────────────
+GET {{keycloak_base}}/realms/{{realm}}/.well-known/openid-configuration
+
+
+### ── Exemplo: Chamar API protegida ──────────────────────────
+# Descomente após subir a API .NET
+# GET http://localhost:5000/api/lancamentos
+# Authorization: Bearer {{access_token}}
+
+# GET http://localhost:5000/api/consolidados
+# Authorization: Bearer {{access_token}}

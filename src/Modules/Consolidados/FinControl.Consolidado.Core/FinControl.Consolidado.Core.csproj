@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+	<ItemGroup>
+		<!-- Wolverine: Mediator, Bus, Messaging -->
+		<PackageReference Include="WolverineFx" />
+		<PackageReference Include="WolverineFx.Http" />
+		<PackageReference Include="WolverineFx.EntityFrameworkCore" />
+
+		<!-- Validation -->
+		<PackageReference Include="FluentValidation" />
+		<PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\..\bulding-blocks\FinControl.Auth\FinControl.Auth.csproj" />
+		<ProjectReference Include="..\..\..\bulding-blocks\FinControl.Infrastructure\FinControl.Infrastructure.csproj" />
+		<ProjectReference Include="..\..\..\bulding-blocks\FinControl.SharedKernel\FinControl.SharedKernel.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Domain\" />
+	  <Folder Include="Features\" />
+	</ItemGroup>
+
+</Project>

@@ -1,0 +1,26 @@
+<Solution>
+  <Folder Name="/Itens de Solução/">
+    <File Path="docker-compose.yml" />
+  </Folder>
+  <Folder Name="/src/" />
+  <Folder Name="/src/bulding-blocks/">
+    <Project Path="src/bulding-blocks/FinControl.Auth/FinControl.Auth.csproj" />
+    <Project Path="src/bulding-blocks/FinControl.Infrastructure/FinControl.Infrastructure.csproj" />
+    <Project Path="src/bulding-blocks/FinControl.SharedKernel/FinControl.SharedKernel.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Consolidados/">
+    <Project Path="src/Modules/Consolidados/FinControl.Consolidado.API/FinControl.Consolidado.API.csproj" />
+    <Project Path="src/Modules/Consolidados/FinControl.Consolidado.Core/FinControl.Consolidado.Core.csproj" Id="9cf1061c-80a0-43fe-9786-694e47ad7128" />
+    <Project Path="src/Modules/Consolidados/FinControl.Consolidado.Worker/FinControl.Consolidado.Worker.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Lancamentos/">
+    <Project Path="src/Modules/Lancamentos/FinControl.Lancamentos.API/FinControl.Lancamentos.API.csproj" />
+    <Project Path="src/Modules/Lancamentos/FinControl.Lancamentos.Core/FinControl.Lancamentos.Core.csproj" Id="2bcf11a4-50cb-4eac-bb89-1f423acabe63" />
+  </Folder>
+  <Folder Name="/src/tests/">
+    <Project Path="src/tests/FinControl.Lancamentos.Tests/FinControl.Lancamentos.Tests.csproj" />
+    <Project Path="src/tests/FinControl.Consolidado.Tests/FinControl.Consolidado.Tests.csproj" />
+    <Project Path="src/tests/FinControl.StressTests/FinControl.StressTests.csproj" />
+  </Folder>
+</Solution>

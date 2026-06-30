@@ -1,0 +1,18 @@
+{
+  "Vault": {
+    "Address": "https://vault.empresa.com:8200",
+    "AuthMethod": "AppRole",
+    "MountPoint": "secret",
+    "SecretPaths": [
+      "dev/postgres",
+      "dev/redis",
+      "dev/rabbitmq",
+      "dev/grafana",
+      "dev/keycloak",
+      "dev/kong",
+      "dev/vault"
+    ],
+    "ConfigurationPrefix": "",
+    "Required": true
+  }
+}

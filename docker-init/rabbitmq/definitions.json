@@ -1,0 +1,156 @@
+{
+  "rabbit_version": "3.13.0",
+  "rabbitmq_version": "3.13.0",
+  "users": [
+    {
+      "name": "fincontrol_user",
+      "password_hash": "LgVg3SF8koptby8FcMR9y7LtifjuGndeBpyBUlWJglX2M4d8",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": "administrator"
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/fincontrol"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "fincontrol_user",
+      "vhost": "/fincontrol",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "topic_permissions": [],
+  "policies": [],
+  "queues": [
+    {
+      "name": "lancamentos.registered",
+      "vhost": "/fincontrol",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 604800000,
+        "x-dead-letter-exchange": "lancamentos.dlx"
+      }
+    },
+    {
+      "name": "consolidado.updated",
+      "vhost": "/fincontrol",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 604800000,
+        "x-dead-letter-exchange": "consolidado.dlx"
+      }
+    },
+    {
+      "name": "lancamentos.dlq",
+      "vhost": "/fincontrol",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 2592000000
+      }
+    },
+    {
+      "name": "consolidado.dlq",
+      "vhost": "/fincontrol",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 2592000000
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "lancamentos.events",
+      "vhost": "/fincontrol",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "consolidado.events",
+      "vhost": "/fincontrol",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "lancamentos.dlx",
+      "vhost": "/fincontrol",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "consolidado.dlx",
+      "vhost": "/fincontrol",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "lancamentos.events",
+      "destination": "lancamentos.registered",
+      "destination_type": "queue",
+      "routing_key": "lancamento.criado",
+      "vhost": "/fincontrol",
+      "arguments": {}
+    },
+    {
+      "source": "lancamentos.events",
+      "destination": "lancamentos.registered",
+      "destination_type": "queue",
+      "routing_key": "lancamento.atualizado",
+      "vhost": "/fincontrol",
+      "arguments": {}
+    },
+    {
+      "source": "consolidado.events",
+      "destination": "consolidado.updated",
+      "destination_type": "queue",
+      "routing_key": "consolidado.diario.atualizado",
+      "vhost": "/fincontrol",
+      "arguments": {}
+    },
+    {
+      "source": "consolidado.events",
+      "destination": "consolidado.updated",
+      "destination_type": "queue",
+      "routing_key": "consolidado.mensal.atualizado",
+      "vhost": "/fincontrol",
+      "arguments": {}
+    },
+    {
+      "source": "lancamentos.dlx",
+      "destination": "lancamentos.dlq",
+      "destination_type": "queue",
+      "routing_key": "#",
+      "vhost": "/fincontrol",
+      "arguments": {}
+    },
+    {
+      "source": "consolidado.dlx",
+      "destination": "consolidado.dlq",
+      "destination_type": "queue",
+      "routing_key": "#",
+      "vhost": "/fincontrol",
+      "arguments": {}
+    }
+  ]
+}

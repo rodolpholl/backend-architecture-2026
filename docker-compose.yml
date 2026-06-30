@@ -1,0 +1,488 @@
+services:
+  # PostgreSQL - Banco de dados transacional único
+  # Suporta múltiplos databases e schemas para diferentes serviços
+  postgres:
+    image: postgres:17-alpine
+    container_name: fincontrol-postgres
+    environment:
+      POSTGRES_USER: fincontrol_admin
+      POSTGRES_PASSWORD: fincontrol_dev_password_123
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+      TZ: America/Sao_Paulo
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+      - ./docker-init/postgres:/docker-entrypoint-initdb.d
+    networks:
+      - fincontrol-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fincontrol_admin"]
+      interval: 5s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+
+  # Redis - Cache distribuído
+  redis:
+    image: redis:7.4-alpine
+    container_name: fincontrol-redis
+    command: redis-server --appendonly yes --requirepass fincontrol_redis_password_123
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - fincontrol-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # RabbitMQ - Message Broker nativo do Wolverine
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: fincontrol-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: fincontrol_user
+      RABBITMQ_DEFAULT_PASS: fincontrol_rabbitmq_password_123
+      RABBITMQ_DEFAULT_VHOST: /fincontrol
+    ports:
+      - "5672:5672"      # AMQP port (Wolverine)
+      - "15672:15672"    # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./docker-init/rabbitmq:/etc/rabbitmq
+    networks:
+      - fincontrol-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # HashiCorp Vault - Secrets Management (Dev Mode)
+  vault:
+    image: hashicorp/vault:1.18
+    container_name: fincontrol-vault
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: fincontrol_dev_token_12345
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_LOG_LEVEL: info
+    ports:
+      - "8200:8200"
+    volumes:
+      - vault_data:/vault/file
+    networks:
+      - fincontrol-network
+    cap_add:
+      - IPC_LOCK
+    entrypoint: sh -c "apk add --no-cache curl && vault server -dev -dev-root-token-id=fincontrol_dev_token_12345"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8200/v1/sys/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Vault Init - Inicializa secrets no Vault após startup
+  vault-init:
+    image: alpine:3.21
+    container_name: fincontrol-vault-init
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: fincontrol_dev_token_12345
+      VAULT_ENV: dev
+    volumes:
+      - ./docker-init/vault/init-vault.sh:/scripts/init-vault.sh:ro
+    networks:
+      - fincontrol-network
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        echo "📦 Instalando dependências..."
+        apk add --no-cache bash curl
+        echo "🔐 Iniciando Vault..."
+        /bin/bash /scripts/init-vault.sh
+        echo "✅ Vault inicializado com sucesso!"
+    restart: no
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Jaeger - Distributed Tracing (OpenTelemetry)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: fincontrol-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"    # UI
+      - "4317:4317"      # OTLP gRPC receiver
+      - "4318:4318"      # OTLP HTTP receiver
+      - "14268:14268"    # Jaeger collector endpoint
+    volumes:
+      - jaeger_data:/badger
+    networks:
+      - fincontrol-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:16686/ || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Grafana Loki - Agregação de Logs
+  loki:
+    image: grafana/loki:3.3.0
+    container_name: fincontrol-loki
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./docker-init/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    networks:
+      - fincontrol-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Prometheus - Coleta de Métricas
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: fincontrol-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker-init/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - fincontrol-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Grafana - Dashboards de Visualização
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: fincontrol-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: fincontrol_grafana_password_123
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker-init/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - fincontrol-network
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Keycloak - Identity & Access Management (OAuth 2.0 / OpenID Connect)
+  keycloak:
+    image: keycloak/keycloak:latest
+    container_name: fincontrol-keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: fincontrol_keycloak_password_123
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: fincontrol_admin
+      KC_DB_PASSWORD: fincontrol_dev_password_123
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8081
+      KC_DB_POOL_INITIAL_SIZE: 5
+      KC_DB_POOL_MAX_SIZE: 20
+      KC_HOSTNAME_STRICT: "false"
+      KC_LOG_LEVEL: info
+      KC_PROXY: edge
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+    ports:
+      - "8081:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+    networks:
+      - fincontrol-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - start-dev
+    healthcheck:
+      test: ["CMD-SHELL", "(echo > /dev/tcp/localhost/8080) 2>/dev/null && exit 0 || exit 1"]
+      interval: 5s
+      timeout: 15s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # Kong - API Gateway (Rate Limiting, Authentication, Routing)
+  kong:
+    image: kong:3.8
+    container_name: fincontrol-kong
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: postgres
+      KONG_PG_USER: fincontrol_admin
+      KONG_PG_PASSWORD: fincontrol_dev_password_123
+      KONG_PG_DATABASE: kong
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_ADMIN_GUI_URL: http://localhost:8002
+      KONG_PLUGINS: bundled
+    ports:
+      - "8000:8000"    # HTTP Proxy
+      - "8443:8443"    # HTTPS Proxy
+      - "8001:8001"    # Admin API
+      - "8002:8002"    # Admin GUI (Kong Manager)
+    volumes:
+      - kong_data:/var/lib/kong
+    networks:
+      - fincontrol-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: sh -c "kong migrations bootstrap --force || true && kong start"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "(echo > /dev/tcp/localhost/8001) 2>/dev/null && exit 0 || exit 1"]
+      interval: 5s
+      timeout: 15s
+      retries: 15
+      start_period: 45s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # Keycloak-Init - Configura Realm, Clients, Roles e Usuários no Keycloak
+  keycloak-init:
+    image: alpine:3.21
+    container_name: fincontrol-keycloak-init
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: fincontrol_keycloak_password_123
+      REALM_NAME: fincontrol
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: fincontrol_dev_token_12345
+      VAULT_ENV: dev
+    volumes:
+      - ./docker-init/keycloak:/scripts:ro
+    networks:
+      - fincontrol-network
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        echo "📦 Instalando dependências..."
+        apk add --no-cache bash curl jq
+        echo "🔐 Inicializando Keycloak..."
+        /bin/bash /scripts/keycloak-init.sh
+        echo "✅ Keycloak inicializado com sucesso!"
+    restart: no
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  # Kong-Init - Configurar Kong com Keycloak OIDC
+  kong-init:
+    image: alpine:3.21
+    container_name: fincontrol-kong-init
+    depends_on:
+      kong:
+        condition: service_healthy
+      keycloak-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./docker-init/kong:/scripts:ro
+    networks:
+      - fincontrol-network
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        echo "📦 Instalando dependências..."
+        apk add --no-cache bash curl
+        echo "🔗 Configurando Kong com Keycloak..."
+        /bin/bash /scripts/kong-init.sh
+        echo "✅ Kong OIDC configurado com sucesso!"
+    restart: no
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  loki_data:
+    driver: local
+  redis_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  vault_data:
+    driver: local
+  jaeger_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  keycloak_data:
+    driver: local
+  kong_data:
+    driver: local
+
+networks:
+  fincontrol-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16

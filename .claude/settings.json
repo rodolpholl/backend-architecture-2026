@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($path = Join-Path $env:LOCALAPPDATA \"NuGet\\\\Cache\"; Get-ChildItem $path -ErrorAction SilentlyContinue | Select-Object -First 5 Name)",
+      "Bash(find ~/.nuget/packages/nbomber -name \"*.dll\" 2>/dev/null | head -5)",
+      "Read(//c/Users/Usuario/.nuget/packages/nbomber/**)"
+    ]
+  }
+}

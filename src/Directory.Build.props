@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+	<TargetFramework>net10.0</TargetFramework>
+	<Nullable>enable</Nullable>
+	<ImplicitUsings>enable</ImplicitUsings>
+	<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+	<AnalysisMode>Recommended</AnalysisMode>
+	<LangVersion>latest</LangVersion>
+	<RootNamespace>$(MSBuildProjectName.Replace("-","_"))</RootNamespace>
+	<AssemblyName>$(MSBuildProjectName)</AssemblyName>
+	<Authors>FinControl</Authors>
+	<Company>FinControl</Company>
+	<Product>FinControl</Product>
+	<Copyright>Copyright © FinControl 2026</Copyright>
+	<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+	<!-- NU1608: conflito transitivo em Microsoft.CodeAnalysis — não controlável diretamente -->
+	<!-- CA1848: LoggerMessage delegates — suprimido globalmente, aplicar progressivamente por módulo -->
+	<!-- NU1107: Conflito de versão transitivo de System.Diagnostics.DiagnosticSource entre Wolverine e OpenTelemetry -->
+	<NoWarn>$(NoWarn);NU1608;CA1848;NU1107</NoWarn>
+  </PropertyGroup>
+</Project>
