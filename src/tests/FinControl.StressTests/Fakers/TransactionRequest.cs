@@ -2,9 +2,9 @@ using System.Text.Json.Serialization;
 
 namespace FinControl.StressTests.Fakers;
 
-// DTO espelho de RegisterTransactionCommand (sem referência ao projeto Core).
-// Propriedades em camelCase via JsonPropertyName para garantir serialização correta.
-internal sealed record LancamentoRequest(
+// DTO mirror of RegisterTransactionCommand (without reference to Core project).
+// Properties in camelCase via JsonPropertyName to ensure correct serialization.
+internal sealed record TransactionRequest(
     [property: JsonPropertyName("modalidade")]     int             Category,
     [property: JsonPropertyName("valor")]          long            Amount,
     [property: JsonPropertyName("descricao")]      string?         Description,
