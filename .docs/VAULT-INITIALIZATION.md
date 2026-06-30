@@ -2,33 +2,33 @@
 
 ## Overview
 
-O Vault e inicializado automaticamente pelo container `vault-init` apos o Vault ficar saudavel.
+Vault is automatically initialized by the `vault-init` container after Vault becomes healthy.
 
-Fluxo:
-1. **Vault** inicia em modo dev com token fixo `fincontrol_dev_token_12345`
-2. **vault-init** aguarda o healthcheck do Vault passar
-3. **vault-init** executa `/scripts/init-vault.sh` criando todos os secrets em `secret/dev/*`
-4. Container encerra com exit 0
+Flow:
+1. **Vault** starts in dev mode with fixed token `fincontrol_dev_token_12345`
+2. **vault-init** waits for Vault healthcheck to pass
+3. **vault-init** executes `/scripts/init-vault.sh` creating all secrets in `secret/dev/*`
+4. Container exits with exit 0
 
-Em seguida, `keycloak-init` aguarda `vault-init` completar antes de configurar o Keycloak.
+Then, `keycloak-init` waits for `vault-init` to complete before configuring Keycloak.
 
 ---
 
-## Secrets Criados
+## Created Secrets
 
-| Secret Path | Chaves | Consumidor |
+| Secret Path | Keys | Consumer |
 |-------------|--------|------------|
-| `secret/dev/postgres` | `connection_string`, username, password, host, port | APIs .NET via `VaultKeys.PostgresConnection` |
-| `secret/dev/redis` | `connection_string`, password, host, port | APIs .NET via `VaultKeys.RedisConnection` |
-| `secret/dev/rabbitmq` | `uri`, username, password, vhost, host, port | APIs .NET via `VaultKeys.RabbitMqUri` |
-| `secret/dev/grafana` | `loki_url`, `otlp_endpoint`, `prometheus_pushgateway` | APIs .NET via `VaultKeys.LokiUrl` etc. |
-| `secret/dev/keycloak` | `realm`, `url`, `issuer`, `jwks_uri`, `kong_client_id`, `kong_client_secret`, `api_client_id`, `api_client_secret` | APIs .NET via `VaultKeys.Keycloak*` |
-| `secret/dev/kong` | `lancamentos_subscription_key`, `consolidados_subscription_key` | APIs .NET via `VaultKeys.Kong*SubscriptionKey` |
-| `secret/dev/vault` | `root_token` | Metadados internos |
+| `secret/dev/postgres` | `connection_string`, username, password, host, port | .NET APIs via `VaultKeys.PostgresConnection` |
+| `secret/dev/redis` | `connection_string`, password, host, port | .NET APIs via `VaultKeys.RedisConnection` |
+| `secret/dev/rabbitmq` | `uri`, username, password, vhost, host, port | .NET APIs via `VaultKeys.RabbitMqUri` |
+| `secret/dev/grafana` | `loki_url`, `otlp_endpoint`, `prometheus_pushgateway` | .NET APIs via `VaultKeys.LokiUrl` etc. |
+| `secret/dev/keycloak` | `realm`, `url`, `issuer`, `jwks_uri`, `kong_client_id`, `kong_client_secret`, `api_client_id`, `api_client_secret` | .NET APIs via `VaultKeys.Keycloak*` |
+| `secret/dev/kong` | `lancamentos_subscription_key`, `consolidados_subscription_key` | .NET APIs via `VaultKeys.Kong*SubscriptionKey` |
+| `secret/dev/vault` | `root_token` | Internal metadata |
 
-### Como as chaves sao lidas no .NET
+### How keys are read in .NET
 
-O `VaultConfigurationProvider` usa o ultimo segmento do path como namespace:
+The `VaultConfigurationProvider` uses the last segment of the path as a namespace:
 
 ```
 secret/dev/postgres → key "connection_string"
@@ -38,11 +38,11 @@ secret/dev/keycloak → key "realm"
     => IConfiguration["keycloak:realm"]
 ```
 
-Acesse sempre via `builder.Configuration[VaultKeys.CONSTANTE]`.
+Always access via `builder.Configuration[VaultKeys.CONSTANT]`.
 
 ---
 
-## Detalhes do Container vault-init
+## vault-init Container Details
 
 ```yaml
 vault-init:
@@ -62,14 +62,14 @@ vault-init:
   restart: no
 ```
 
-O script usa `bash` (nao `sh`) por precisar de:
+The script uses `bash` (not `sh`) because it needs:
 - `${VAR:-default}` — parameter expansion
 - `set -euo pipefail` — bash strict mode
-- `local -a array=("$@")` — declaracao de array
+- `local -a array=("$@")` — array declaration
 
 ---
 
-## Como Verificar
+## How to Verify
 
 ### 1. Vault UI
 
@@ -78,81 +78,81 @@ http://localhost:8200/ui
 Token: fincontrol_dev_token_12345
 ```
 
-Navegue para `secret > dev >` — voce deve ver: `grafana`, `keycloak`, `kong`, `postgres`, `rabbitmq`, `redis`, `vault`.
+Navigate to `secret > dev >` — you should see: `grafana`, `keycloak`, `kong`, `postgres`, `rabbitmq`, `redis`, `vault`.
 
 ### 2. Via CLI
 
 ```bash
-# Entrar no container vault
+# Enter vault container
 docker-compose exec vault sh
 
-# Ler um secret
+# Read a secret
 vault kv get secret/dev/postgres
 vault kv get secret/dev/keycloak
 vault kv get secret/dev/kong
 ```
 
-### 3. Ver logs
+### 3. Check logs
 
 ```bash
 docker-compose logs vault-init --tail 50
 ```
 
-Saida esperada ao final:
+Expected output at the end:
 ```
-Todos os secrets foram inicializados com sucesso!
+All secrets have been successfully initialized!
 ```
 
 ---
 
 ## Troubleshooting
 
-### vault-init termina com Exited (1)
+### vault-init exits with Exited (1)
 
 ```bash
-# Ver erro detalhado
+# See detailed error
 docker-compose logs vault-init
 
-# Causas comuns:
-# 1. Vault ainda inicializando — aguarde mais 20s e tente novamente
-# 2. Permissao negada no script — verificar montagem do volume
+# Common causes:
+# 1. Vault still initializing — wait another 20s and try again
+# 2. Permission denied in script — check volume mount
 
-# Re-executar:
+# Re-run:
 docker-compose rm -f vault-init
 docker-compose run --rm vault-init
 ```
 
-### Secrets nao aparecem na UI
+### Secrets do not appear in UI
 
 ```bash
-# Confirmar que vault-init completou com sucesso
-docker-compose logs vault-init | grep -E "(sucesso|Error)"
+# Confirm vault-init completed successfully
+docker-compose logs vault-init | grep -E "(success|Error)"
 
-# Verificar conexao
+# Check connection
 curl -s http://localhost:8200/v1/sys/health | jq .sealed
-# Deve retornar: false
+# Should return: false
 ```
 
-### API .NET falha com "Secret not found"
+### .NET API fails with "Secret not found"
 
-A API lanca excecao explicita ao subir se qualquer secret obrigatorio nao estiver no Vault. Verifique:
+The API throws an explicit exception on startup if any required secret is not in Vault. Verify:
 
-1. `docker-compose ps vault-init` — deve mostrar `Exited (0)`
-2. `docker-compose logs vault-init | tail -5` — deve mostrar sucesso
-3. Confirme que `vault.settings.json` lista os paths corretos (`dev/postgres`, `dev/redis`, etc.)
-
----
-
-## Proximas Etapas Pos-Inicializacao
-
-1. `vault-init` completa → `keycloak-init` inicia automaticamente
-2. `keycloak-init` completa → `kong-init` inicia automaticamente
-3. Todos os inits com `Exited (0)` → infraestrutura pronta para as APIs .NET
-
-Ver [INIT-CONTAINERS-CLEANUP.md](INIT-CONTAINERS-CLEANUP.md) para remover os containers de init apos conclusao.
+1. `docker-compose ps vault-init` — should show `Exited (0)`
+2. `docker-compose logs vault-init | tail -5` — should show success
+3. Confirm that `vault.settings.json` lists correct paths (`dev/postgres`, `dev/redis`, etc.)
 
 ---
 
-**Versao:** 2.0
-**Ultima atualizacao:** Maio 2026
-**Status:** Ativo
+## Next Steps After Initialization
+
+1. `vault-init` completes → `keycloak-init` starts automatically
+2. `keycloak-init` completes → `kong-init` starts automatically
+3. All inits with `Exited (0)` → infrastructure ready for .NET APIs
+
+See [INIT-CONTAINERS-CLEANUP.md](INIT-CONTAINERS-CLEANUP.md) to remove init containers after completion.
+
+---
+
+**Version:** 2.0
+**Last updated:** May 2026
+**Status:** Active

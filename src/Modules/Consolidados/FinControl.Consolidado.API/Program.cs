@@ -7,14 +7,14 @@ using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ==================== CONFIGURAÇÃO DE SECRETS (VAULT) ====================
+// ==================== SECRETS CONFIGURATION (VAULT) ====================
 try
 {
     builder.AddFinControlVault();
 }
 catch (Exception ex) when (builder.Environment.IsDevelopment())
 {
-    Console.WriteLine($"⚠️  Vault não disponível em desenvolvimento: {ex.Message}");
+    Console.WriteLine($"⚠️  Vault not available in development: {ex.Message}");
 }
 
 // ==================== LOGGING ====================
@@ -24,17 +24,17 @@ try
 }
 catch (Exception ex) when (builder.Environment.IsDevelopment())
 {
-    Console.WriteLine($"⚠️  Serilog não fully configurado em desenvolvimento: {ex.Message}");
+    Console.WriteLine($"⚠️  Serilog not fully configured in development: {ex.Message}");
 }
 
-// ==================== OBSERVABILIDADE ====================
+// ==================== OBSERVABILITY ====================
 try
 {
     builder.AddFinControlObservability("fincontrol-consolidados");
 }
 catch (Exception ex) when (builder.Environment.IsDevelopment())
 {
-    Console.WriteLine($"⚠️  Observabilidade não disponível em desenvolvimento: {ex.Message}");
+    Console.WriteLine($"⚠️  Observability not available in development: {ex.Message}");
 }
 
 // ==================== HEALTH CHECKS ====================
@@ -47,17 +47,17 @@ try
 }
 catch (Exception ex) when (builder.Environment.IsDevelopment())
 {
-    Console.WriteLine($"⚠️  Health checks incompletos em desenvolvimento: {ex.Message}");
+    Console.WriteLine($"⚠️  Health checks incomplete in development: {ex.Message}");
 }
 
-// ==================== AUTENTICAÇÃO JWT (KEYCLOAK) ====================
+// ==================== JWT AUTHENTICATION (KEYCLOAK) ====================
 try
 {
     builder.AddFinControlKeycloakAuth();
 }
 catch (Exception ex) when (builder.Environment.IsDevelopment())
 {
-    Console.WriteLine($"⚠️  Keycloak não configurado em desenvolvimento: {ex.Message}");
+    Console.WriteLine($"⚠️  Keycloak not configured in development: {ex.Message}");
 }
 
 // ==================== API / OPENAPI ====================
@@ -66,7 +66,7 @@ builder.Services.AddOpenApi(options =>
     options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
 });
 
-// ==================== TODOS OS MÓDULOS DE FEATURES ====================
+// ==================== ALL FEATURE MODULES ====================
 builder.AddAllModules();
 
 // ==================== EXCEPTION HANDLING ====================
@@ -78,46 +78,46 @@ var app = builder.Build();
 
 // ==================== MIDDLEWARES HTTP ====================
 
-// 1. CorrelationId — DEVE SER PRIMEIRO: popula HttpContext.Items["X-Correlation-Id"]
-//    usado por SubscriptionKeyMiddleware, GlobalExceptionHandler e SerilogRequestLogging
+// 1. CorrelationId — MUST BE FIRST: populates HttpContext.Items["X-Correlation-Id"]
+//    used by SubscriptionKeyMiddleware, GlobalExceptionHandler and SerilogRequestLogging
 app.UseMiddleware<CorrelationIdMiddleware>();
 
-// 2. Request Logging (Serilog) — após CorrelationId para capturar o ID nos logs
+// 2. Request Logging (Serilog) — after CorrelationId to capture the ID in logs
 try
 {
     app.UseFinControlRequestLogging();
 }
 catch
 {
-    // Se Serilog não foi configurado, continua sem
+    // If Serilog wasn't configured, continue without it
 }
 
 // 2. HTTPS Redirect
 app.UseHttpsRedirection();
 
-// 3. Observabilidade
+// 3. Observability
 try
 {
     app.UseFinControlObservability();
 }
 catch
 {
-    // Se observabilidade não foi configurada, continua sem
+    // If observability wasn't configured, continue without it
 }
 
-// 4. Exception Handler Global (RFC 7807 ProblemDetails)
+// 4. Global Exception Handler (RFC 7807 ProblemDetails)
 app.UseExceptionHandler();
 
-// 5. Subscription Key (segunda camada após Kong — cobre requisições que bypassam o gateway)
+// 5. Subscription Key (second layer after Kong — covers requests that bypass the gateway)
 app.UseSubscriptionKeyValidation(VaultKeys.KongConsolidadosSubscriptionKey);
 
-// 6. Autenticação e Autorização
+// 6. Authentication and Authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
 // ==================== HEALTH CHECKS ====================
-// /health      → liveness  (sem checks, só confirma que o processo está vivo)
-// /health/ready → readiness (executa checks com tag "ready": postgres, redis, rabbitmq)
+// /health      → liveness  (no checks, just confirms the process is alive)
+// /health/ready → readiness (executes checks with "ready" tag: postgres, redis, rabbitmq)
 app.MapFinControlHealthChecks();
 
 // ==================== ENDPOINTS ====================
@@ -136,5 +136,5 @@ app.MapAllModules();
 app.MapFinControlMetricsEndpoint();
 
 // ==================== RUN ====================
-Console.WriteLine($"\n🚀 Consolidados iniciando em modo: {(app.Environment.IsDevelopment() ? "DESENVOLVIMENTO" : "PRODUÇÃO")}\n");
+Console.WriteLine($"\n🚀 Consolidated starting in mode: {(app.Environment.IsDevelopment() ? "DEVELOPMENT" : "PRODUCTION")}\n");
 app.Run();

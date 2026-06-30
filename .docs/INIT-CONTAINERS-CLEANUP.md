@@ -1,26 +1,26 @@
-# Sequencia de Inicializacao - FinControl Backend
+# Initialization Sequence - FinControl Backend
 
-## Visao Geral
+## Overview
 
-A infraestrutura usa **tres containers de inicializacao** que executam scripts de configuracao e encerram. Eles nao devem permanecer em execucao apos completar com sucesso.
+The infrastructure uses **three initialization containers** that run configuration scripts and exit. They should not remain running after successfully completing.
 
 ```
-vault-init      → cria secrets no Vault
-keycloak-init   → cria realm, clients, roles e usuarios no Keycloak
-kong-init       → configura services, routes, key-auth e OIDC no Kong
+vault-init      → creates secrets in Vault
+keycloak-init   → creates realm, clients, roles and users in Keycloak
+kong-init       → configures services, routes, key-auth and OIDC in Kong
 ```
 
-Cada um depende do anterior via `depends_on: service_completed_successfully`.
+Each one depends on the previous via `depends_on: service_completed_successfully`.
 
 ---
 
-## Sequencia Completa
+## Complete Sequence
 
 ```
 docker-compose up -d
         |
         v
-[FASE 1 - Infra]
+[PHASE 1 - Infrastructure]
   fincontrol-postgres    (5-10s)   → healthcheck: pg_isready
   fincontrol-redis       (3-5s)    → healthcheck: redis-cli ping
   fincontrol-rabbitmq    (5-10s)   → healthcheck: rabbitmq-diagnostics ping
@@ -29,32 +29,32 @@ docker-compose up -d
   fincontrol-prometheus  (10-15s)  → healthcheck: wget /-/healthy
         |
         v
-[FASE 2 - Plataforma]
-  fincontrol-keycloak    (20-30s)  → healthcheck: TCP :8080 aberto
-  fincontrol-kong        (15-25s)  → healthcheck: TCP :8001 aberto
+[PHASE 2 - Platform]
+  fincontrol-keycloak    (20-30s)  → healthcheck: TCP :8080 open
+  fincontrol-kong        (15-25s)  → healthcheck: TCP :8001 open
   fincontrol-grafana     (10-20s)  → healthcheck: /api/health
         |
         v
-[FASE 3 - Inicializacao Automatica]
-  fincontrol-vault-init     (5-10s)  → cria secret/dev/* no Vault
+[PHASE 3 - Automatic Initialization]
+  fincontrol-vault-init     (5-10s)  → creates secret/dev/* in Vault
         |
         v
-  fincontrol-keycloak-init  (5-10s)  → cria realm fincontrol, clients, roles, usuarios
+  fincontrol-keycloak-init  (5-10s)  → creates realm fincontrol, clients, roles, users
         |
         v
-  fincontrol-kong-init      (5-10s)  → registra services, routes, key-auth, OIDC
+  fincontrol-kong-init      (5-10s)  → registers services, routes, key-auth, OIDC
         |
         v
-  Exited (0) x3  → INFRAESTRUTURA PRONTA
+  Exited (0) x3  → INFRASTRUCTURE READY
 ```
 
-**Tempo total estimado:** 90-120 segundos
+**Estimated total time:** 90-120 seconds
 
 ---
 
-## Timing por Container
+## Timing per Container
 
-| Container | Tempo de Startup | Status Esperado |
+| Container | Startup Time | Expected Status |
 |-----------|-----------------|-----------------|
 | fincontrol-postgres | 5-10s | healthy |
 | fincontrol-redis | 3-5s | healthy |
@@ -71,40 +71,40 @@ docker-compose up -d
 
 ---
 
-## Monitoramento de Status
+## Status Monitoring
 
 ```powershell
-# Ver todos os containers
+# View all containers
 docker-compose ps
 
-# Monitorar logs dos inits em tempo real
+# Monitor init logs in real time
 docker-compose logs -f vault-init
 docker-compose logs -f keycloak-init
 docker-compose logs -f kong-init
 ```
 
-### Sinais de Sucesso
+### Success Signals
 
 **vault-init:**
 ```
-Todos os secrets foram inicializados com sucesso!
+All secrets have been successfully initialized!
 ```
 
 **keycloak-init:**
 ```
-Keycloak inicializado com sucesso!
+Keycloak successfully initialized!
 ```
 
 **kong-init:**
 ```
-Kong OIDC configurado com sucesso!
+Kong OIDC successfully configured!
 ```
 
 ---
 
-## Limpeza dos Containers de Inicializacao
+## Initialization Containers Cleanup
 
-Os containers de init ficam com status `Exited (0)` apos conclusao. Podem ser removidos a qualquer momento.
+Init containers end with status `Exited (0)` after completion. They can be removed at any time.
 
 ### Via script
 
@@ -112,7 +112,7 @@ Os containers de init ficam com status `Exited (0)` apos conclusao. Podem ser re
 .\scripts\Cleanup-Init-Containers.ps1
 ```
 
-### Manualmente
+### Manually
 
 ```powershell
 docker rm -f fincontrol-vault-init fincontrol-keycloak-init fincontrol-kong-init
@@ -126,26 +126,26 @@ docker-compose rm -f vault-init keycloak-init kong-init
 
 ---
 
-## Containers Permanentes vs. Temporarios
+## Permanent vs. Temporary Containers
 
-### NAO REMOVA:
-- `fincontrol-postgres` — banco principal
-- `fincontrol-redis` — cache distribuido
+### DO NOT REMOVE:
+- `fincontrol-postgres` — main database
+- `fincontrol-redis` — distributed cache
 - `fincontrol-rabbitmq` — message broker
 - `fincontrol-vault` — secrets manager
 - `fincontrol-keycloak` — identity provider
 - `fincontrol-kong` — API gateway
-- `fincontrol-prometheus` / `fincontrol-grafana` — observabilidade
-- `fincontrol-jaeger` — tracing distribuido
+- `fincontrol-prometheus` / `fincontrol-grafana` — observability
+- `fincontrol-jaeger` — distributed tracing
 
-### SEGURO REMOVER (apos Exited 0):
+### SAFE TO REMOVE (after Exited 0):
 - `fincontrol-vault-init`
 - `fincontrol-keycloak-init`
 - `fincontrol-kong-init`
 
 ---
 
-## Estado Esperado Pos-Inicializacao
+## Expected State After Initialization
 
 ```
 NAME                       IMAGE                    STATUS
@@ -159,76 +159,76 @@ fincontrol-prometheus      prom/prometheus          Up (healthy)
 fincontrol-grafana         grafana/grafana          Up (healthy)
 fincontrol-jaeger          jaegertracing/all-in-one Up (unhealthy*)
 
-(* Jaeger healthcheck via wget pode ser flaky — nao impede o funcionamento)
+(* Jaeger healthcheck via wget can be flaky — does not prevent operation)
 ```
 
 ---
 
 ## Troubleshooting
 
-### vault-init falhou
+### vault-init failed
 
 ```powershell
 docker-compose logs vault-init
 
-# Causas comuns:
-# 1. Vault ainda inicializando — aguardar mais 20s
-# 2. Vault nao passou no healthcheck — verificar docker-compose ps vault
+# Common causes:
+# 1. Vault still initializing — wait another 20s
+# 2. Vault did not pass healthcheck — verify docker-compose ps vault
 
-# Reexecutar:
+# Re-run:
 docker-compose run --rm vault-init
 ```
 
-### keycloak-init falhou
+### keycloak-init failed
 
 ```powershell
 docker-compose logs keycloak-init
 
-# Causas comuns:
-# 1. Keycloak ainda inicializando (pode demorar 30-60s)
-# 2. vault-init nao completou (keycloak-init depende dele)
-# 3. DB do Keycloak nao inicializado
+# Common causes:
+# 1. Keycloak still initializing (can take 30-60s)
+# 2. vault-init did not complete (keycloak-init depends on it)
+# 3. Keycloak database not initialized
 
-# Reexecutar:
+# Re-run:
 docker-compose run --rm keycloak-init
 ```
 
-### kong-init falhou
+### kong-init failed
 
 ```powershell
 docker-compose logs kong-init
 
-# Causas comuns:
-# 1. keycloak-init nao completou
-# 2. Kong ainda executando migrations do bootstrap
-# 3. Client secret do Keycloak nao foi salvo no Vault
+# Common causes:
+# 1. keycloak-init did not complete
+# 2. Kong still running bootstrap migrations
+# 3. Keycloak client secret not saved in Vault
 
-# Reexecutar:
+# Re-run:
 docker-compose run --rm kong-init
 ```
 
-### "Container does not exist" ao tentar remover
+### "Container does not exist" when trying to remove
 
-Normal — o container ja foi removido anteriormente. Verificar com:
+Normal — the container has already been removed previously. Check with:
 ```bash
 docker ps -a | grep fincontrol.*init
 ```
 
 ---
 
-## Proximos Passos
+## Next Steps
 
-Apos todos os inits com `Exited (0)`:
+After all inits with `Exited (0)`:
 
-1. Verificar saude dos servicos: `docker-compose ps`
-2. Confirmar secrets no Vault: http://localhost:8200/ui
-3. Confirmar realm no Keycloak: http://localhost:8081
-4. Confirmar rotas no Kong: http://localhost:8002
-5. Iniciar as APIs .NET (migrations aplicadas automaticamente)
+1. Check service health: `docker-compose ps`
+2. Confirm secrets in Vault: http://localhost:8200/ui
+3. Confirm realm in Keycloak: http://localhost:8081
+4. Confirm routes in Kong: http://localhost:8002
+5. Start .NET APIs (migrations applied automatically)
 
 ---
 
-## Referencias
+## References
 
 - [VAULT-INITIALIZATION.md](VAULT-INITIALIZATION.md)
 - [KEYCLOAK_SETUP_GUIDE.md](KEYCLOAK_SETUP_GUIDE.md)
@@ -237,6 +237,6 @@ Apos todos os inits com `Exited (0)`:
 
 ---
 
-**Versao:** 2.0
-**Ultima atualizacao:** Maio 2026
-**Status:** Ativo
+**Version:** 2.0
+**Last updated:** May 2026
+**Status:** Active

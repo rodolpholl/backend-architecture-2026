@@ -1,238 +1,238 @@
-﻿# 🏗️ Arquitetura - Sistema de Controle de Fluxo de Caixa
+﻿# 🏗️ Architecture - Cash Flow Management System
 
-**Projeto:** FinControl — Sistema de Controle de Fluxo de Caixa para Comerciante  
-**Data:** Maio 2026  
-**Versão:** 3.0 — Implementação em produção
-
----
-
-## Status de Implementação
-
-> Esta documentação foi atualizada para refletir o estado **implementado** do projeto (v2.0).  
-> As seções de justificativas e volumetria permanecem como referência arquitetural.
-
-### O que está implementado
-
-| Componente | Status | Observações |
-|-----------|--------|-------------|
-| **FinControl.Lancamentos.API** | ✅ Funcional | `POST /lancamentos/registrar` + Wolverine handlers + Vault + JWT |
-| **FinControl.Lancamentos.Core** | ✅ Funcional | CQRS via Wolverine, FluentValidation, EF Core, Outbox manual |
-| **FinControl.Consolidado.API** | ✅ Funcional | `GET /consolidados/saldo?data-lancamento=yyyy-MM-dd` via Redis |
-| **FinControl.Consolidado.Core** | ✅ Funcional | Command + Query handlers via Wolverine |
-| **FinControl.Consolidado.Worker** | ✅ Funcional | Consumer RabbitMQ direto → atualiza Redis |
-| **FinControl.Infrastructure** | ✅ Funcional | Cache, Lock, Vault, Middleware, Observability, RabbitMqPublisher |
-| **FinControl.SharedKernel** | ✅ Funcional | Entidades base, eventos, resultado tipado |
-| **FinControl.Auth** | ✅ Funcional | Integração Keycloak (JWT Bearer) |
-| **HashiCorp Vault** | ✅ Integrado | Secrets carregados via `VaultConfigurationProvider` |
-| **Redis (Cache + Lock)** | ✅ Integrado | `RedisCacheService` + `IRedisLockService` (SETNX + Lua) |
-| **RabbitMQ (Outbox Manual)** | ✅ Integrado | `OutboxMessage` no PostgreSQL + `OutboxRelayService` (BackgroundService) |
-| **OutboxRelayService + Polly** | ✅ Implementado | Polling 5s, batch 50, retry 3× exponencial com jitter |
-| **RabbitMqPublisher** | ✅ Implementado | Publisher direto AMQP (building block reutilizável) |
-| **PostgreSQL + Migrations** | ✅ Integrado | Auto-apply no startup (fail-fast), `AddOutboxMessages` aplicada |
-| **Idempotência** | ✅ Implementado | `IdempotencyKey` (UUID) + índice único no BD |
-| **Soft Delete** | ✅ Implementado | Global query filter `DeletedAt == null` |
-| **SubscriptionKeyMiddleware** | ✅ Implementado | Segunda camada após Kong; bypass `/health` e `/metrics` |
-| **Kong request-transformer** | ✅ Configurado | Kong injeta `X-Subscription-Key` automaticamente — jamais exposta ao cliente |
-| **Kong JWT (RS256 + Keycloak)** | ✅ Configurado | Chave pública Keycloak registrada como credencial JWT no Kong |
-| **Grafana Dashboard** | ✅ Provisionado | Dashboard HTTP provisionado via JSON (`fincontrol-http-v1`) |
-| **Prometheus /metrics** | ✅ Funcional | `prometheus-net` expõe métricas em `/metrics` (ambas as APIs) |
-| **Testes automatizados** | ✅ 83 testes | 48 (Lancamentos) + 35 (Consolidado), zero falhas |
-| **FinControl.StressTests** | ✅ Implementado | NBomber 5.5.0 — 50 req/s (Consolidado) + 10 req/s (Lancamentos) em paralelo; JWT auto-fetch do Keycloak; relatórios HTML + Markdown |
-
-### O que está em aberto (roadmap)
-
-| Item | Motivo adiado |
-|------|--------------|
-| `totalCreditos`/`totalDebitos` no saldo consolidado | Redesign do modelo de resposta |
-| `Lancamento` herdar `AggregateRoot<long>` | Refatoração de escopo maior |
-| Deduplicação de `ModalidadeLancamento` (enum duplicado) | Impacto em cast `(ModalidadeLancamento)(int)` |
-| Setters públicos → encapsulamento em `Lancamento` | Modelo anêmico — refatoração de domínio |
+**Project:** FinControl — Cash Flow Management System for Merchants  
+**Date:** May 2026  
+**Version:** 3.0 — Production Implementation
 
 ---
 
-## Índice
+## Implementation Status
 
-1. [Requisitos](#requisitos)
-2. [Análise de Volumetria](#análise-de-volumetria)
-3. [Justificativas Tecnológicas](#justificativas-tecnológicas)
-   - 3.1 [Por que Microserviços?](#por-que-microserviços)
-   - 3.2 [Por que Redis Cache?](#por-que-redis-cache-é-essencial)
-   - 3.3 [Por que PostgreSQL?](#por-que-postgresql-não-dynamodbcassandra)
-   - 3.4 [Por que RabbitMQ?](#por-que-rabbitmq-não-kafkaaws-sqs)
-   - 3.5 [Por que Kong (API Gateway)?](#por-que-kong-ou-nginxhaproxy-para-api-gateway)
-   - 3.6 [Por que CQRS?](#por-que-cqrs-command-query-responsibility-segregation)
-   - 3.7 [Por que Monolito Modular?](#por-que-começar-com-monolito-modular-vertical-slicing)
-4. [Evolução Arquitetural: Vertical Slicing + CQRS](#evolução-arquitetural-vertical-slicing--cqrs)
-5. [Arquitetura Proposta: Microserviços + Event-Driven](#arquitetura-proposta-microserviços--event-driven)
-6. [Estrutura de Pastas](#estrutura-de-pastas)
-7. [Implementação: Vertical Slicing com Wolverine + Minimal APIs](#implementação-vertical-slicing-com-wolverine--minimal-apis)
-8. [Padrões Arquiteturais Aplicados](#padrões-arquiteturais-aplicados)
-9. [Stack Técnico](#stack-técnico)
-10. [Componentes Principais](#componentes-principais)
-11. [Fluxos de Dados](#fluxos-de-dados)
-12. [Requisitos Não-Funcionais](#requisitos-não-funcionais)
-13. [Segurança](#segurança)
-    - 13.1 [Autenticação](#1-autenticação)
-    - 13.2 [Autorização](#2-autorização)
-    - 13.3 [Validação de Entrada](#3-validação-de-entrada)
-    - 13.4 [Criptografia em Trânsito](#4-criptografia-em-trânsito)
+> This documentation has been updated to reflect the **implemented** state of the project (v2.0).  
+> The justification and volumetry sections remain as architectural reference.
+
+### What is Implemented
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **FinControl.Lancamentos.API** | ✅ Functional | `POST /lancamentos/registrar` + Wolverine handlers + Vault + JWT |
+| **FinControl.Lancamentos.Core** | ✅ Functional | CQRS via Wolverine, FluentValidation, EF Core, Manual Outbox |
+| **FinControl.Consolidado.API** | ✅ Functional | `GET /consolidados/saldo?data-lancamento=yyyy-MM-dd` via Redis |
+| **FinControl.Consolidado.Core** | ✅ Functional | Command + Query handlers via Wolverine |
+| **FinControl.Consolidado.Worker** | ✅ Functional | Direct RabbitMQ Consumer → updates Redis |
+| **FinControl.Infrastructure** | ✅ Functional | Cache, Lock, Vault, Middleware, Observability, RabbitMqPublisher |
+| **FinControl.SharedKernel** | ✅ Functional | Base entities, events, typed result |
+| **FinControl.Auth** | ✅ Functional | Keycloak integration (JWT Bearer) |
+| **HashiCorp Vault** | ✅ Integrated | Secrets loaded via `VaultConfigurationProvider` |
+| **Redis (Cache + Lock)** | ✅ Integrated | `RedisCacheService` + `IRedisLockService` (SETNX + Lua) |
+| **RabbitMQ (Manual Outbox)** | ✅ Integrated | `OutboxMessage` in PostgreSQL + `OutboxRelayService` (BackgroundService) |
+| **OutboxRelayService + Polly** | ✅ Implemented | Polling 5s, batch 50, retry 3× exponential with jitter |
+| **RabbitMqPublisher** | ✅ Implemented | Direct AMQP publisher (reusable building block) |
+| **PostgreSQL + Migrations** | ✅ Integrated | Auto-apply on startup (fail-fast), `AddOutboxMessages` applied |
+| **Idempotency** | ✅ Implemented | `IdempotencyKey` (UUID) + unique index in DB |
+| **Soft Delete** | ✅ Implemented | Global query filter `DeletedAt == null` |
+| **SubscriptionKeyMiddleware** | ✅ Implemented | Second layer after Kong; bypass `/health` and `/metrics` |
+| **Kong request-transformer** | ✅ Configured | Kong injects `X-Subscription-Key` automatically — never exposed to client |
+| **Kong JWT (RS256 + Keycloak)** | ✅ Configured | Keycloak public key registered as JWT credential in Kong |
+| **Grafana Dashboard** | ✅ Provisioned | HTTP Dashboard provisioned via JSON (`fincontrol-http-v1`) |
+| **Prometheus /metrics** | ✅ Functional | `prometheus-net` exposes metrics at `/metrics` (both APIs) |
+| **Automated Tests** | ✅ 83 tests | 48 (Lancamentos) + 35 (Consolidado), zero failures |
+| **FinControl.StressTests** | ✅ Implemented | NBomber 5.5.0 — 50 req/s (Consolidado) + 10 req/s (Lancamentos) in parallel; JWT auto-fetch from Keycloak; HTML + Markdown reports |
+
+### Open Items (Roadmap)
+
+| Item | Reason Deferred |
+|------|-----------------|
+| `totalCredits`/`totalDebits` in consolidated balance | Response model redesign |
+| `Lancamento` inherit `AggregateRoot<long>` | Larger refactoring scope |
+| Deduplication of `ModalidadeLancamento` (duplicate enum) | Impact on cast `(ModalidadeLancamento)(int)` |
+| Public setters → encapsulation in `Lancamento` | Anemic model — domain refactoring |
+
+---
+
+## Table of Contents
+
+1. [Requirements](#requirements)
+2. [Volumetry Analysis](#volumetry-analysis)
+3. [Technology Justifications](#technology-justifications)
+   - 3.1 [Why Microservices?](#why-microservices)
+   - 3.2 [Why Redis Cache?](#why-redis-cache-is-essential)
+   - 3.3 [Why PostgreSQL?](#why-postgresql-not-dynamodbcassandra)
+   - 3.4 [Why RabbitMQ?](#why-rabbitmq-not-kafkaaws-sqs)
+   - 3.5 [Why Kong (API Gateway)?](#why-kong-or-nginxhaproxy-for-api-gateway)
+   - 3.6 [Why CQRS?](#why-cqrs-command-query-responsibility-segregation)
+   - 3.7 [Why Modular Monolith?](#why-start-with-modular-monolith-vertical-slicing)
+4. [Architectural Evolution: Vertical Slicing + CQRS](#architectural-evolution-vertical-slicing--cqrs)
+5. [Proposed Architecture: Microservices + Event-Driven](#proposed-architecture-microservices--event-driven)
+6. [Folder Structure](#folder-structure)
+7. [Implementation: Vertical Slicing with Wolverine + Minimal APIs](#implementation-vertical-slicing-with-wolverine--minimal-apis)
+8. [Applied Architectural Patterns](#applied-architectural-patterns)
+9. [Tech Stack](#tech-stack)
+10. [Main Components](#main-components)
+11. [Data Flows](#data-flows)
+12. [Non-Functional Requirements](#non-functional-requirements)
+13. [Security](#security)
+    - 13.1 [Authentication](#1-authentication)
+    - 13.2 [Authorization](#2-authorization)
+    - 13.3 [Input Validation](#3-input-validation)
+    - 13.4 [Encryption in Transit](#4-encryption-in-transit)
     - 13.5 [Firewall & WAF (ModSecurity + Kong)](#5-firewall--waf-web-application-firewall)
-    - 13.6 [Proteção Contra Ataques](#6-proteção-contra-ataques-resumo)
+    - 13.6 [Protection Against Attacks](#6-protection-against-attacks-summary)
 14. [Key Vault & Secrets Management](#key-vault--secrets-management)
-15. [Autenticação & Autorização Centralizadas](#autenticação--autorização-centralizadas)
-16. [Monitoramento & Observabilidade](#monitoramento--observabilidade)
-17. [Plano de Implementação](#plano-de-implementação)
-18. [Resumo Executivo: Vertical Slicing + CQRS para 50 req/s](#resumo-executivo-vertical-slicing--cqrs-para-50-reqs)
-19. [Próximas Etapas](#próximas-etapas)
-20. [Referências & Recursos](#referências--recursos)
+15. [Centralized Authentication & Authorization](#centralized-authentication--authorization)
+16. [Monitoring & Observability](#monitoring--observability)
+17. [Implementation Plan](#implementation-plan)
+18. [Executive Summary: Vertical Slicing + CQRS for 50 req/s](#executive-summary-vertical-slicing--cqrs-for-50-reqs)
+19. [Next Steps](#next-steps)
+20. [References & Resources](#references--resources)
 
 ---
 
-## Requisitos
+## Requirements
 
-### Requisitos de Negócio
-- ✅ Serviço que faça o controle de lançamentos (débitos e créditos)
-- ✅ Serviço do consolidado diário (relatório de saldo consolidado)
+### Business Requirements
+- ✅ Service that controls transactions (debits and credits)
+- ✅ Daily consolidated service (consolidated balance report)
 
-### Requisitos Técnicos Obrigatórios
-- ✅ Desenho da solução documentado
-- ✅ Implementação em C#
-- ✅ Testes automatizados
-- ✅ Aplicação de boas práticas (Design Patterns, SOLID, Arquitetura)
-- ✅ README com instruções de execução
-- ✅ Hospedagem em repositório público (GitHub)
-- ✅ Documentação completa no repositório
+### Mandatory Technical Requirements
+- ✅ Solution design documented
+- ✅ Implementation in C#
+- ✅ Automated tests
+- ✅ Application of best practices (Design Patterns, SOLID, Architecture)
+- ✅ README with execution instructions
+- ✅ Hosting in public repository (GitHub)
+- ✅ Complete documentation in repository
 
-### Requisitos Não-Funcionais
-- **Resiliência**: Lançamentos não deve ficar indisponível se consolidado cair
-- **Performance**: Consolidado recebe **50 requisições/segundo**
-- **Confiabilidade**: Máximo **5% de perda de requisições**
+### Non-Functional Requirements
+- **Resilience**: Lancamentos should remain available even if Consolidado goes down
+- **Performance**: Consolidado receives **50 requests/second**
+- **Reliability**: Maximum **5% request loss**
 
 ---
 
-## Análise de Volumetria
+## Volumetry Analysis
 
-### Premissas de Negócio
+### Business Assumptions
 
 ```
-REQUISITO CRÍTICO: 50 requisições/segundo (consolidado)
-└─ Máxima de pico estabelecida no desafio
-   Com máximo 5% de perda de requisições permitida
+CRITICAL REQUIREMENT: 50 requests/second (consolidated)
+└─ Peak limit established in the challenge
+   With maximum 5% request loss allowed
 
-Horário operacional: 06:00 às 22:00 (16 horas/dia)
-Dias operacionais: 360 dias/ano
-Crescimento anual: 15% (expansão de filiais/volume)
+Operating hours: 06:00 to 22:00 (16 hours/day)
+Operating days: 360 days/year
+Annual growth: 15% (branch expansion/volume)
 
-PREMISSA DE ESCRITA (defensiva — volume não especificado no desafio):
-├─ O desafio NÃO define volume de lançamentos — premissa é decisão arquitetural
-├─ Num sistema real de fluxo de caixa, escrita é o gargalo financeiro crítico
-├─ Cada lançamento exige: validação, ACID, idempotência, publicação de evento
-└─ Premissa adotada: sistema WRITE-HEAVY (escrita domina em complexidade e risco)
+WRITE ASSUMPTION (defensive — volume not specified in the challenge):
+├─ The challenge does NOT define entry volume — assumption is an architectural decision
+├─ In a real cash flow system, writes are the critical financial bottleneck
+├─ Each entry requires: validation, ACID, idempotency, event publishing
+└─ Adopted assumption: WRITE-HEAVY system (writes dominate in complexity and risk)
 
-MODELO DE ALOCAÇÃO DE RECURSOS:
-├─ 70% dos recursos → Serviço de Lançamentos (escrita, ACID, Outbox, eventos)
-├─ 30% dos recursos → Serviço de Consolidado (leitura servida ~99% por cache)
-└─ Justificativa: leitura é O(1) via Redis; escrita exige pipeline completo
+RESOURCE ALLOCATION MODEL:
+├─ 70% of resources → Entry Service (writes, ACID, Outbox, events)
+├─ 30% of resources → Consolidated Service (reads served ~99% by cache)
+└─ Rationale: reads are O(1) via Redis; writes require complete pipeline
 ```
 
 ---
 
 ### Cálculo Realista: 50 req/s como Base
 
-#### 1️⃣ Requisições Diárias de Leitura (Consolidado)
+#### 1️⃣ Daily Read Requests (Consolidated)
 
 ```
-Cenário de Pico sustentado: 50 req/s
-Distribuição durante o dia: Concentrado nas 16h de operação
+Sustained peak scenario: 50 req/s
+Distribution during the day: Concentrated in 16h of operation
 
-CÁLCULO:
-Requisições por hora:
-  50 req/s × 3.600 segundos = 180.000 req/hora
+CALCULATION:
+Requests per hour:
+  50 req/s × 3,600 seconds = 180,000 req/hour
 
-Requisições por dia (16h operacionais):
-  180.000 req/hora × 16 horas = 2.880.000 req/dia
+Requests per day (16h operational):
+  180,000 req/hour × 16 hours = 2,880,000 req/day
 
-Requisições por ano (360 dias):
-  2.880.000 req/dia × 360 dias = 1.036.800.000 req/ano
+Requests per year (360 days):
+  2,880,000 req/day × 360 days = 1,036,800,000 req/year
 
-Com crescimento 15% a.a. durante 10 anos:
+With 15% annual growth over 10 years:
 ┌──────┬─────────────────┬──────────────────┐
-│ Ano  │ Taxa Req/s      │ Req/Ano          │
+│ Year │ Req/s Rate      │ Req/Year         │
 ├──────┼─────────────────┼──────────────────┤
-│  1   │ 50 req/s        │ 1.036.800.000    │
-│  2   │ 57,5 req/s      │ 1.192.320.000    │
-│  3   │ 66,1 req/s      │ 1.371.168.000    │
-│  4   │ 76 req/s        │ 1.576.843.000    │
-│  5   │ 87,4 req/s      │ 1.813.369.000    │
-│  6   │ 100,5 req/s     │ 2.085.324.000    │
-│  7   │ 115,6 req/s     │ 2.398.123.000    │
-│  8   │ 133 req/s       │ 2.757.842.000    │
-│  9   │ 153 req/s       │ 3.171.518.000    │
-│ 10   │ 176 req/s       │ 3.647.246.000    │
+│  1   │ 50 req/s        │ 1,036,800,000    │
+│  2   │ 57.5 req/s      │ 1,192,320,000    │
+│  3   │ 66.1 req/s      │ 1,371,168,000    │
+│  4   │ 76 req/s        │ 1,576,843,000    │
+│  5   │ 87.4 req/s      │ 1,813,369,000    │
+│  6   │ 100.5 req/s     │ 2,085,324,000    │
+│  7   │ 115.6 req/s     │ 2,398,123,000    │
+│  8   │ 133 req/s       │ 2,757,842,000    │
+│  9   │ 153 req/s       │ 3,171,518,000    │
+│ 10   │ 176 req/s       │ 3,647,246,000    │
 └──────┴─────────────────┴──────────────────┘
 
-TOTAL em 10 anos: ~21.051.383.000 requisições (21 bilhões aproximadamente).
+TOTAL over 10 years: ~21,051,383,000 requests (approximately 21 billion).
 ```
 
 ---
 
-#### 2️⃣ Impacto da Cache Redis
+#### 2️⃣ Impact of Redis Cache
 
 ```
-SEM CACHE:
-├─ 50 req/s → 50 queries ao PostgreSQL
-├─ Latência BD: 20-50ms por query
-├─ Bandwidth: ~5 MB/s (alto)
-├─ CPU Database: ~60-70% em picos
-└─ Limite prático: ~100 req/s antes de colapso
+WITHOUT CACHE:
+├─ 50 req/s → 50 queries to PostgreSQL
+├─ DB Latency: 20-50ms per query
+├─ Bandwidth: ~5 MB/s (high)
+├─ Database CPU: ~60-70% at peaks
+└─ Practical limit: ~100 req/s before collapse
 
-COM CACHE REDIS — INVALIDAÇÃO ATIVA POR EVENTO (Write-Through):
-├─ Estratégia: cache sensibilizado a CADA lançamento registrado
-│  └─ Consumer escuta LançamentoRegistrado → recalcula saldo → SET Redis
+WITH REDIS CACHE — ACTIVE INVALIDATION BY EVENT (Write-Through):
+├─ Strategy: cache refreshed for EACH entry registered
+│  └─ Consumer listens to EntryRegistered → recalculates balance → SET Redis
 ├─ 50 req/s → Redis ✅
-│  └─ ~99%+ resolvidas em <5ms (cache sempre fresco)
-├─ ~0,5 req/s → PostgreSQL ❌
-│  └─ Apenas cold start ou falha do consumer (DLQ + retry)
-├─ Latência média: <5ms (cache hit) | 30ms (miss pontual)
-├─ CPU Database: ~5-10% em picos (-85%)
+│  └─ ~99%+ resolved in <5ms (cache always fresh)
+├─ ~0.5 req/s → PostgreSQL ❌
+│  └─ Only cold start or consumer failure (DLQ + retry)
+├─ Average latency: <5ms (cache hit) | 30ms (occasional miss)
+├─ Database CPU: ~5-10% at peaks (-85%)
 ├─ Bandwidth: ~250 KB/s (-95%)
-└─ Limite: ~500+ req/s (teórico)
+└─ Limit: ~500+ req/s (theoretical)
 
-DIFERENÇA DA INVALIDAÇÃO ATIVA vs TTL PASSIVO:
+DIFFERENCE BETWEEN ACTIVE INVALIDATION vs PASSIVE TTL:
 ┌──────────────────────────────┬───────────────────────┬──────────────────────────┐
-│ Característica               │ TTL Passivo (60s)     │ Event-Driven (por escrita)│
+│ Characteristic               │ Passive TTL (60s)     │ Event-Driven (by write)  │
 ├──────────────────────────────┼───────────────────────┼──────────────────────────┤
-│ Cache desatualizado (máx.)   │ 60 segundos           │ 0 segundos               │
-│ Hit rate esperado            │ 95%                   │ 99%+                     │
-│ Complexidade                 │ Baixa                 │ Média (consumer + Outbox) │
-│ Risco de dado inconsistente  │ Alta (60s de lag)     │ Muito baixa              │
-│ Acoplamento write→read       │ Nenhum                │ Assíncrono (via evento)  │
+│ Cache staleness (max.)       │ 60 seconds            │ 0 seconds                │
+│ Expected hit rate            │ 95%                   │ 99%+                     │
+│ Complexity                   │ Low                   │ Medium (consumer + Outbox)│
+│ Risk of data inconsistency   │ High (60s lag)        │ Very low                 │
+│ Write→Read coupling          │ None                  │ Asynchronous (via event) │
 └──────────────────────────────┴───────────────────────┴──────────────────────────┘
 
-ECONOMIA QUANTIFICÁVEL:
+QUANTIFIABLE SAVINGS:
 ┌─────────────────────────┬─────────┬─────────┬──────────┐
-│ Métrica                 │ Sem LRU │ Com LRU │ Redução  │
+│ Metric                  │ No Cache│ With LRU│ Reduction│
 ├─────────────────────────┼─────────┼─────────┼──────────┤
-│ Queries ao BD/dia       │ 2.88B   │ 0.014B  │ -99%     │
-│ CPU Database em picos   │ 70%     │ 10%     │ -85%     │
-│ Latência P99            │ 50ms    │ 5ms     │ -90%     │
-│ Conexões BD necessárias │ 200+    │ 10      │ -95%     │
-│ Bandwidth rede          │ 5 MB/s  │ 0.25MB/s│ -95%     │
-│ Escalabilidade          │ 100 r/s │ 500+ r/s│ +400%    │
+│ Queries to DB/day       │ 2.88B   │ 0.014B  │ -99%     │
+│ Database CPU at peaks   │ 70%     │ 10%     │ -85%     │
+│ P99 Latency             │ 50ms    │ 5ms     │ -90%     │
+│ DB connections needed   │ 200+    │ 10      │ -95%     │
+│ Network bandwidth       │ 5 MB/s  │ 0.25MB/s│ -95%     │
+│ Scalability             │ 100 r/s │ 500+ r/s│ +400%    │
 └─────────────────────────┴─────────┴─────────┴──────────┘
 
-Cálculo de memória Redis necessária:
-├─ Saldo consolidado por dia: ~500 bytes
-├─ Guarda 90 dias (período útil): 500B × 90 = 45 KB
-├─ TTL de segurança: 24h (fallback se consumer falhar)
-├─ Estruturas overhead (meta): +5 KB
-├─ TOTAL necessário: ~60 KB !!!
-└─ Recomendação: Mínimo 512 MB (garantir margem)
+Redis memory calculation needed:
+├─ Consolidated balance per day: ~500 bytes
+├─ Stores 90 days (useful period): 500B × 90 = 45 KB
+├─ Security TTL: 24h (fallback if consumer fails)
+├─ Overhead structures (meta): +5 KB
+├─ TOTAL needed: ~60 KB !!!
+└─ Recommendation: Minimum 512 MB (ensure margin)
 
-Status: ✅ Redis ESSENCIAL para atingir 50 req/s com <5% de perda
-        ✅ Invalidação ativa garante consistência em tempo real
-        ✅ Outbox Pattern protege contra falha do consumer
-        ✅ ROI: Permite escalar sem aumentar BD
+Status: ✅ Redis ESSENTIAL to reach 50 req/s with <5% loss
+        ✅ Active invalidation ensures real-time consistency
+        ✅ Outbox Pattern protects against consumer failure
+        ✅ ROI: Allows scaling without increasing DB
 ```
 
 ---
@@ -283,7 +283,7 @@ RECOMENDAÇÃO: 2 servidores de Lançamentos (ativo-ativo)
 ├─ Pipeline de escrita é o crítico: falha aqui = perda de dados
 ├─ Outbox Pattern garante entrega do evento mesmo com crash
 ├─ PgBouncer (pool de conexões) protege PostgreSQL de spike de escrita
-└─ Rate limiting por cliente: 10 req/s (proteção contra DDoS de escrita)
+└─ Rate limiting per client: 10 req/s (protection against write DDoS)
 
 Load Balancer (Nginx/HAProxy):
 ├─ Tráfego: 50 req/s leitura + escrita (não é desafio para LB)
@@ -299,22 +299,22 @@ Status: ✅ 1 × Consolidado + 2 × Lançamentos + 1 × LB = Solução write-opt
 
 ---
 
-#### 4️⃣ Requisições de ESCRITA (Lançamentos)
+#### 4️⃣ WRITE Requests (Entries)
 
 ```
-LANÇAMENTOS — SISTEMA WRITE-HEAVY (gargalo operacional crítico)
-├─ Volume: não especificado no desafio → premissa arquitetural livre
-├─ Premissa adotada: write-heavy (70% da carga de infraestrutura)
-├─ Cada lançamento percorre pipeline completo (com CorrelationId em cada etapa):
-│   ├─ 1. Validação de negócio (tipo, valor, data) — gera UUID CorrelationId
-│   ├─ 2. Verificação de idempotência (IdempotencyKey único) — CorrelationId nos logs
-│   ├─ 3. Persistência ACID no PostgreSQL — CorrelationId armazenado para auditoria
-│   ├─ 4. Publicação de evento via Outbox Pattern — CorrelationId em x-correlation-id RabbitMQ header
-│   ├─ 5. Consumer extrai CorrelationId do message header
-│   └─ 6. Consumer atualiza Redis → cache fresco (CorrelationId propagado em logs)
-└─ Latência esperada: < 50ms (escrita + publicação de evento)
+ENTRIES — WRITE-HEAVY SYSTEM (critical operational bottleneck)
+├─ Volume: not specified in challenge → free architectural assumption
+├─ Adopted assumption: write-heavy (70% of infrastructure load)
+├─ Each entry traverses complete pipeline (with CorrelationId at each stage):
+│   ├─ 1. Business validation (type, value, date) — generates UUID CorrelationId
+│   ├─ 2. Idempotency check (unique IdempotencyKey) — CorrelationId in logs
+│   ├─ 3. ACID persistence in PostgreSQL — CorrelationId stored for audit
+│   ├─ 4. Event publishing via Outbox Pattern — CorrelationId in x-correlation-id RabbitMQ header
+│   ├─ 5. Consumer extracts CorrelationId from message header
+│   └─ 6. Consumer updates Redis → fresh cache (CorrelationId propagated in logs)
+└─ Expected latency: < 50ms (write + event publishing)
 
-**Timeline com CorrelationId:**
+**Timeline with CorrelationId:**
 ```
 POST /lancamentos
   ↓ [10ms] gera CorrelationId (UUID) + valida
@@ -328,89 +328,89 @@ response: {Id, CorrelationId} + x-correlation-id header
 ```
 
 IMPACTO DE CADA LANÇAMENTO NO SISTEMA:
-├─ PostgreSQL: escrita ACID (Serializable) → impacto em conexões
-├─ Outbox: publicação transacional → sem perda mesmo com crash
-├─ RabbitMQ: entrega garantida ao consumer
-├─ Redis: invalidação/atualização da chave `consolidado:{data}`
-└─ Consolidado GET: próxima requisição já retorna saldo atualizado
+├─ PostgreSQL: ACID write (Serializable) → connection impact
+├─ Outbox: transactional publishing → no loss even with crash
+├─ RabbitMQ: guaranteed delivery to consumer
+├─ Redis: invalidation/update of `consolidado:{data}` key
+└─ Consolidated GET: next request already returns updated balance
 
-IDEMPOTÊNCIA E CONCORRÊNCIA (múltiplos PDVs):
-├─ IdempotencyKey (UUID) por operação → duplicatas rejeitadas
-├─ Unique constraint no BD: (IdempotencyKey, Data)
-├─ Dois terminais simultâneos → um ganha, outro recebe 409 Conflict
-└─ Sem IdempotencyKey → risco de lançamento duplicado em retry
+IDEMPOTENCY AND CONCURRENCY (multiple point-of-sale terminals):
+├─ IdempotencyKey (UUID) per operation → duplicates rejected
+├─ Unique constraint in DB: (IdempotencyKey, Date)
+├─ Two simultaneous terminals → one wins, other gets 409 Conflict
+└─ Without IdempotencyKey → risk of duplicate entry on retry
 
-MODELO DE RECURSOS (70/30):
-├─ 70% → Lançamentos Service: 2 instâncias ativo-ativo + PgBouncer
-├─ 30% → Consolidado Service: 1 instância (leitura ~99% via Redis)
-└─ Justificativa: escrita é a fonte de verdade; leitura é O(1) no cache
+RESOURCE MODEL (70/30):
+├─ 70% → Entry Service: 2 active-active instances + PgBouncer
+├─ 30% → Consolidated Service: 1 instance (reads ~99% via Redis)
+└─ Rationale: writes are the source of truth; reads are O(1) in cache
 
-Status: ✅ Sistema write-dominant, não read-heavy
-        ✅ Outbox Pattern garante consistência lançamento → cache
-        ✅ Idempotência protege integridade financeira
-        ✅ 70% dos recursos onde o risco financeiro reside
+Status: ✅ Write-dominant system, not read-heavy
+        ✅ Outbox Pattern ensures consistency entry → cache
+        ✅ Idempotency protects financial integrity
+        ✅ 70% of resources where financial risk resides
 ```
 
 ---
 
-#### 5️⃣ Projeção de Armazenamento - 10 Anos
+#### 5️⃣ Storage Projection - 10 Years
 
 ```
-LANÇAMENTOS (escrita):
+ENTRIES (writes):
 
-Escrita por ano: 350 lançamentos/dia × 360 dias = 126.000/ano
+Write per year: 350 entries/day × 360 days = 126,000/year
 
-Tipo (enum — valores típicos de uma loja):
-├─ Venda            (crédito — venda no caixa/PDV)
-├─ Devolucao        (débito — estorno de venda)
-├─ Suprimento       (crédito — reforço de caixa)
-├─ Sangria          (débito — retirada de caixa)
-├─ PagamentoFornecedor (débito — pagamento de nota)
-├─ RecebimentoDivida   (crédito — cobrança de cliente)
-└─ Outros           (fallback para lançamentos manuais — descricao obrigatória)
+Type (enum — typical store values):
+├─ Sale            (credit — point-of-sale/register sale)
+├─ Return          (debit — sale refund)
+├─ Supplement      (credit — cash top-up)
+├─ Withdrawal      (debit — cash withdrawal)
+├─ SupplierPayment (debit — invoice payment)
+├─ ReceivableColl  (credit — customer collection)
+└─ Other           (fallback for manual entries — description required)
 
-Tamanho por registro:
+Size per record:
 ├─ Id (BIGINT, auto-increment): 8 bytes
-├─ NavigationId (UUID, para referências externas): 16 bytes
+├─ NavigationId (UUID, for external references): 16 bytes
 ├─ IdempotencyKey (UUID): 16 bytes
-├─ CorrelationId (UUID, rastreamento ponta a ponta): 16 bytes ← trace distribuído através de RabbitMQ
-├─ Tipo (SMALLINT/enum): 2 bytes
-├─ Valor (DECIMAL 18,2): 9 bytes
-├─ DataLancamento (DATE): 4 bytes
-├─ Descricao (VARCHAR 300, obrigatória se Tipo='Outros'): ~60-100 bytes (média)
-├─ UsuarioId (UUID, do Keycloak): 16 bytes ← GUID para rastrear quem fez o lançamento
-├─ UsuarioNome (VARCHAR 100, desnormalizado): ~50 bytes (média) ← snapshot do nome na data do lançamento
-├─ UsuarioEmail (VARCHAR 100, desnormalizado): ~50 bytes (média) ← snapshot do email na data do lançamento
-├─ CriadoEm (TIMESTAMPTZ): 8 bytes
-└─ TOTAL: ~195 bytes/registro
+├─ CorrelationId (UUID, end-to-end tracing): 16 bytes ← distributed trace through RabbitMQ
+├─ Type (SMALLINT/enum): 2 bytes
+├─ Value (DECIMAL 18,2): 9 bytes
+├─ EntryDate (DATE): 4 bytes
+├─ Description (VARCHAR 300, required if Type='Other'): ~60-100 bytes (average)
+├─ UserId (UUID, from Keycloak): 16 bytes ← GUID to track who made the entry
+├─ UserName (VARCHAR 100, denormalized): ~50 bytes (average) ← snapshot of name at entry date
+├─ UserEmail (VARCHAR 100, denormalized): ~50 bytes (average) ← snapshot of email at entry date
+├─ CreatedAt (TIMESTAMPTZ): 8 bytes
+└─ TOTAL: ~195 bytes/record
 
-Em 10 anos: 
-126.000 × 10 × 195 bytes = 247.500.000 bytes ≈ 236 MB (apenas dados)
+In 10 years: 
+126,000 × 10 × 195 bytes = 247,500,000 bytes ≈ 236 MB (data only)
 
-Com índices (6 índices × 20% cada — Id, NavigationId, IdempotencyKey, CorrelationId, DataLancamento, UsuarioId):
+With indexes (6 indexes × 20% each — Id, NavigationId, IdempotencyKey, CorrelationId, EntryDate, UserId):
 236 MB + (236 × 1.2) = 483 MB
 
-Com CONSOLIDADOS (1/dia × 10 anos):
-3.650 × 400 bytes = 1.460 KB
+With CONSOLIDATEDS (1/day × 10 years):
+3,650 × 400 bytes = 1,460 KB
 
-TOTAL FINAL: ~485 MB (confortável, espaço sobra)
-Recomendação: PostgreSQL com 10-20 GB de espaço
-Status: ✅ Simples, sem sharding necessário
+FINAL TOTAL: ~485 MB (comfortable, space to spare)
+Recommendation: PostgreSQL with 10-20 GB of space
+Status: ✅ Simple, no sharding needed
 
-**Nota sobre CorrelationId (Rastreamento Distribuído Ponta a Ponta):**
+**Note on CorrelationId (End-to-End Distributed Tracing):**
 
-O `CorrelationId` é essencial para observabilidade em operações assíncronas via RabbitMQ:
+The `CorrelationId` is essential for observability in asynchronous operations via RabbitMQ:
 
-- **Criação:** Gerado como UUID v4 na API quando lançamento é criado
-- **Persistência:** Armazenado na tabela `lancamentos` para auditoria histórica
-- **Propagação:** 
-  - Passado em response headers HTTP (client pode rastrear status)
-  - Incluído em `x-correlation-id` header do RabbitMQ message
-  - Propagado através de OpenTelemetry context (traceparent)
-- **Logs Estruturados:** Cada linha de log inclui CorrelationId para agregação
-- **APM Integration:** Jaeger/Datadog agrupa toda operação sob um único trace
+- **Creation:** Generated as UUID v4 in API when entry is created
+- **Persistence:** Stored in `entries` table for historical audit
+- **Propagation:** 
+  - Passed in HTTP response headers (client can track status)
+  - Included in `x-correlation-id` header of RabbitMQ message
+  - Propagated through OpenTelemetry context (traceparent)
+- **Structured Logs:** Each log line includes CorrelationId for aggregation
+- **APM Integration:** Jaeger/Datadog groups entire operation under single trace
 
-**Pipeline com CorrelationId:**
+**Pipeline with CorrelationId:**
 ```
   POST /lancamentos
     └─ [1] Gera CorrelationId (UUID)
@@ -422,142 +422,142 @@ O `CorrelationId` é essencial para observabilidade em operações assíncronas 
                                   └─ [7] Observabilidade: timeline completa em Jaeger
 ```
 
-**Benefícios Práticos:**
+**Practical Benefits:**
 - ✅ Debugging: \"qual consumer processou lancamento X?\" → query logs com CorrelationId
-- ✅ Auditoria: rastreamento financeiro completo com timestamps
-- ✅ SLA Monitoring: tempo total na pipeline (latência por CorrelationId)
-- ✅ Error Correlation: se falhar no Outbox → logs com mesmo CorrelationId pinçam o problema
-- ✅ Consumer Idempotência: chave (CorrelationId + consumer_name) previne reprocessamento
+- ✅ Audit: complete financial tracing with timestamps
+- ✅ SLA Monitoring: total time in pipeline (latency per CorrelationId)
+- ✅ Error Correlation: if Outbox fails → logs with same CorrelationId pinpoint the issue
+- ✅ Consumer Idempotency: key (CorrelationId + consumer_name) prevents reprocessing
 
-**Nota sobre Auditoria de Usuário:**
-- `UsuarioId` — UUID/GUID do Keycloak, identidade imutável
-- `UsuarioNome` e `UsuarioEmail` — **snapshot desnormalizados** da data do lançamento
-  - ✅ **Por quê desnormalizar?** Velocidade de queries sem JOINs com Keycloak
-  - ✅ **Auditoria histórica** — preserva quem fez a ação com que nome/email naquela data
-  - ⚠️ Se usuário trocar email/nome, lançamento antigo mantém o valor original
-- Permite queries rápidas: `SELECT * FROM lancamentos WHERE usuario_email = 'fulano@empresa.com'`
-- Para dados atuais completos do usuário, buscar no Keycloak via UsuarioId se necessário
+**Note on User Audit:**
+- `UserId` — UUID/GUID from Keycloak, immutable identity
+- `UserName` and `UserEmail` — **denormalized snapshots** of entry date
+  - ✅ **Why denormalize?** Query speed without JOINs with Keycloak
+  - ✅ **Historical audit** — preserves who took action with name/email on that date
+  - ⚠️ If user changes email/name, old entry keeps original value
+- Enables fast queries: `SELECT * FROM entries WHERE user_email = 'someone@company.com'`
+- For current complete user data, fetch from Keycloak via UserId if needed
 
 
-CACHE CONSOLIDADO (Redis):
+CONSOLIDATED CACHE (Redis):
 
-Dia tipico:
-├─ Saldo consolidado: ~500 bytes
-├─ Replicas para cache coerência: ~50 KB (máximo)
-├─ TTL: 60 segundos (refresh automático)
+Typical day:
+├─ Consolidated balance: ~500 bytes
+├─ Replicas for cache coherence: ~50 KB (maximum)
+├─ TTL: 60 seconds (automatic refresh)
 
-Em 10 anos:
-├─ Histórico no Redis: Apenas últimos 90 dias
-├─ Memória pico: <100 MB
-├─ Memória alocada: 512 MB (margem)
+In 10 years:
+├─ Redis history: Last 90 days only
+├─ Peak memory: <100 MB
+├─ Allocated memory: 512 MB (margin)
 
-Status: ✅ Micro-instância Redis (~$5/mês)
+Status: ✅ Micro-instance Redis (~$5/month)
 ```
 
 ---
 
-#### 6️⃣ Filas de Mensagens (RabbitMQ)
+#### 6️⃣ Message Queues (RabbitMQ)
 
 ```
-VOLUME DE EVENTOS:
+EVENT VOLUME:
 
-Lançamentos publicados: 350/dia
+Entries published: 350/day
 
-Tamanho do evento:
+Event size:
 ├─ Metadata: 100 bytes
-├─ Dados: 300 bytes
-├─ Envelope AMQP/JSON: 200 bytes
-└─ TOTAL: ~600 bytes/evento
+├─ Data: 300 bytes
+├─ AMQP/JSON Envelope: 200 bytes
+└─ TOTAL: ~600 bytes/event
 
-Em dia tipico: 350 × 600 bytes = 210 KB
+On typical day: 350 × 600 bytes = 210 KB
 
-RabbitMQ configurado com:
-├─ TTL de mensagem: 24 horas (reprocessamento)
-├─ Dead Letter Queue para falhas
-├─ Persistence habilitada
-└─ Replicação (2 nós) para HA
+RabbitMQ configured with:
+├─ Message TTL: 24 hours (reprocessing)
+├─ Dead Letter Queue for failures
+├─ Persistence enabled
+└─ Replication (2 nodes) for HA
 
-Espaço necessário:
-├─ Buffer 1 dia: 210 KB
-├─ Com redundância 3x: 630 KB
-└─ Espaço alocado: 1 GB
+Space needed:
+├─ 1 day buffer: 210 KB
+├─ With 3x redundancy: 630 KB
+└─ Allocated space: 1 GB
 
-Status: ✅ RabbitMQ com 1 GB RAM (muito confortável)
+Status: ✅ RabbitMQ with 1 GB RAM (very comfortable)
 ```
 
 ---
 
-### Resumo Consolidado - 10 Anos com Base em 50 req/s
+### Consolidated Summary - 10 Years Based on 50 req/s
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│      VOLUMETRIA COM BASE 50 REQ/S — MODELO WRITE-HEAVY   │
+│      VOLUMETRY BASED 50 REQ/S — WRITE-HEAVY MODEL       │
 ├──────────────────────────────────────────────────────────┤
-│ REQUISIÇÕES DE LEITURA (Consolidado)                     │
-│   ├─ Pico: 50 req/s (requisito do desafio)               │
-│   ├─ Diário: 2.880.000 requisições                       │
-│   ├─ Anual: 1.036.800.000 requisições                    │
-│   ├─ 10 anos: 21.051.383.000 requisições                 │
-│   └─ Cache hit: 99%+ → ~49,5 req/s servidas pelo Redis   │
+│ READ REQUESTS (Consolidated)                             │
+│   ├─ Peak: 50 req/s (challenge requirement)              │
+│   ├─ Daily: 2,880,000 requests                           │
+│   ├─ Annual: 1,036,800,000 requests                      │
+│   ├─ 10 years: 21,051,383,000 requests                   │
+│   └─ Cache hit: 99%+ → ~49.5 req/s served by Redis       │
 │                                                          │
-│ REQUISIÇÕES DE ESCRITA (Lançamentos)                     │
-│   ├─ Volume: não especificado no desafio                 │
-│   ├─ Premissa: write-heavy (fonte de verdade do sistema) │
-│   ├─ Cada lançamento: ACID + Outbox + cache invalidation │
-│   └─ Recurso alocado: 70% da infraestrutura              │
+│ WRITE REQUESTS (Entries)                                 │
+│   ├─ Volume: not specified in challenge                  │
+│   ├─ Assumption: write-heavy (system source of truth)    │
+│   ├─ Each entry: ACID + Outbox + cache invalidation     │
+│   └─ Allocated resource: 70% of infrastructure           │
 │                                                          │
-│ MODELO DE ALOCAÇÃO (70/30):                              │
-│   ├─ 70% → Lançamentos: escrita, ACID, eventos, Outbox   │
-│   └─ 30% → Consolidado: leitura O(1) via Redis (<5ms)   │
+│ ALLOCATION MODEL (70/30):                                │
+│   ├─ 70% → Entries: writes, ACID, events, Outbox         │
+│   └─ 30% → Consolidated: O(1) reads via Redis (<5ms)    │
 │                                                          │
-│ PROPORÇÃO ANTES (errada): 8.333:1 (leitura dominante)   │
-│ MODELO ATUAL (correto): escrita é o gargalo crítico      │
-│   └─ Leitura é barata com cache ativo; escrita tem custo │
+│ RATIO BEFORE (wrong): 8,333:1 (read-dominant)           │
+│ CURRENT MODEL (correct): writes are critical bottleneck  │
+│   └─ Reads cheap with active cache; writes have cost     │
 │                                                          │
-│ ARMAZENAMENTO                                            │
-│   ├─ PostgreSQL: ~482 MB base + 15% a.a. de crescimento  │
-│   ├─ Redis Cache: 512 MB alocado (TTL 24h de segurança)  │
+│ STORAGE                                                  │
+│   ├─ PostgreSQL: ~482 MB base + 15% annually growth      │
+│   ├─ Redis Cache: 512 MB allocated (24h security TTL)    │
 │   ├─ RabbitMQ: 1 GB RAM                                  │
 │   └─ TOTAL: ~2 GB                                        │
 │                                                          │
-│ COMPONENTES RECOMENDADOS                                 │
+│ RECOMMENDED COMPONENTS                                   │
 │   ├─ Load Balancer: 1 (Nginx/HAProxy)                    │
-│   ├─ Lançamentos Service: 2 instâncias (ativo-ativo)     │
-│   ├─ Consolidado Service: 1 instância (+ auto-scaling)   │
+│   ├─ Entry Service: 2 instances (active-active)          │
+│   ├─ Consolidated Service: 1 instance (+ auto-scaling)   │
 │   ├─ PostgreSQL: 1 primary + 1 read replica              │
-│   ├─ PgBouncer: pool de conexões para Lançamentos        │
-│   ├─ Redis: 1 + 1 replica (invalidação ativa por evento) │
-│   └─ RabbitMQ: HA pair (2 nós)                           │
+│   ├─ PgBouncer: connection pool for Entries              │
+│   ├─ Redis: 1 + 1 replica (active event invalidation)    │
+│   └─ RabbitMQ: HA pair (2 nodes)                         │
 │                                                          │
-│ ESCALABILIDADE                                           │
-│   ├─ Leitura: Redis escala horizontalmente (cluster)     │
-│   ├─ Escrita: Lançamentos ativo-ativo + PgBouncer        │
-│   ├─ Ano 5: 87,4 req/s ÷ 2 = 43,7 req/s/srv (OK)       │
-│   └─ Ano 10: 176 req/s → add instâncias Consolidado ✅  │
+│ SCALABILITY                                              │
+│   ├─ Reads: Redis scales horizontally (cluster)          │
+│   ├─ Writes: Entry active-active + PgBouncer             │
+│   ├─ Year 5: 87.4 req/s ÷ 2 = 43.7 req/s/srv (OK)       │
+│   └─ Year 10: 176 req/s → add Consolidated instances ✅ │
 │                                                          │
-│ CUSTOS ESTIMADOS (AWS/Azure/GCP)                         │
-│   ├─ Load Balancer: $5-10/mês                            │
-│   ├─ 2 × EC2 t3.micro (Lançamentos): $10-15/mês         │
-│   ├─ 1 × EC2 t3.micro (Consolidado): $5-8/mês           │
-│   ├─ 1 × RDS PostgreSQL t3.small: $20-30/mês            │
-│   ├─ 1 × ElastiCache Redis t3.micro: $5-10/mês          │
-│   ├─ 1 × RabbitMQ managed: $10-20/mês                    │
-│   └─ TOTAL: ~$55-95/mês (infraestrutura otimizada)       │
+│ ESTIMATED COSTS (AWS/Azure/GCP)                          │
+│   ├─ Load Balancer: $5-10/month                          │
+│   ├─ 2 × EC2 t3.micro (Entry): $10-15/month              │
+│   ├─ 1 × EC2 t3.micro (Consolidated): $5-8/month        │
+│   ├─ 1 × RDS PostgreSQL t3.small: $20-30/month          │
+│   ├─ 1 × ElastiCache Redis t3.micro: $5-10/month        │
+│   ├─ 1 × RabbitMQ managed: $10-20/month                  │
+│   └─ TOTAL: ~$55-95/month (optimized infrastructure)     │
 │                                                          │
-│ STATUS: ✅ WRITE-HEAVY COM LEITURA SERVIDA POR CACHE    │
-│         ✅ OUTBOX PATTERN GARANTE CONSISTÊNCIA           │
-│         ✅ SLA 50 REQ/S ATENDIDO COM 99%+ CACHE HIT     │
-│         ✅ CRESCIMENTO ORGÂNICO ATÉ 176 REQ/S           │
+│ STATUS: ✅ WRITE-HEAVY WITH READS SERVED BY CACHE       │
+│         ✅ OUTBOX PATTERN ENSURES CONSISTENCY            │
+│         ✅ SLA 50 REQ/S MET WITH 99%+ CACHE HIT         │
+│         ✅ ORGANIC GROWTH UP TO 176 REQ/S                │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### 🔄 Estratégia de Cache: Write-Through com Invalidação por Evento
+### 🔄 Cache Strategy: Write-Through with Event-Based Invalidation
 
-A consistência entre dados persistidos e dados em cache é garantida pelo padrão **Write-Through Cache via Consumer**, acionado por cada evento `LançamentoRegistrado` publicado no RabbitMQ.
+Consistency between persisted data and cached data is guaranteed by **Write-Through Cache via Consumer** pattern, triggered by each `EntryRegistered` event published on RabbitMQ.
 
-#### Fluxo Completo (Escrita → Cache → Leitura)
+#### Complete Flow (Write → Cache → Read)
 
 ```
 POST /lancamentos
@@ -568,23 +568,23 @@ POST /lancamentos
   └─ 5. Retorna 201 Created em <50ms
 
 Outbox Publisher (background worker):
-  └─ SELECT eventos não publicados → PUBLISH LançamentoRegistrado → UPDATE status
+  └─ SELECT unpublished events → PUBLISH EntryRegistered → UPDATE status
 
-RabbitMQ → Consumer (Consolidado Service):
-  ├─ Recebe LançamentoRegistrado
-  ├─ Recalcula saldo do dia afetado (soma créditos - débitos)
-  ├─ SET Redis: consolidado:{data} = {saldo} EX 86400
-  └─ ACK da mensagem (garantia de at-least-once delivery)
+RabbitMQ → Consumer (Consolidated Service):
+  ├─ Receives EntryRegistered
+  ├─ Recalculates affected day balance (sum credits - debits)
+  ├─ SET Redis: consolidado:{data} = {balance} EX 86400
+  └─ ACK message (at-least-once delivery guarantee)
 
-GET /consolidado/{data}:
+GET /consolidated/{data}:
   ├─ Redis HIT  (99%+) → <5ms ✅
-  └─ Redis MISS (cold start / flush) → Calcula do BD → Cacheia → Retorna
+  └─ Redis MISS (cold start / flush) → Calculates from DB → Caches → Returns
 ```
 
-#### Implementação C# — Handler de atualização do cache (implementado)
+#### C# Implementation — Cache update handler (implemented)
 
 ```csharp
-// FinControl.Consolidado.Core/Features/Commands/AtualizarSaldoConsolidao/
+// FinControl.Consolidated.Core/Features/Commands/UpdateConsolidatedBalance/
 public class AtualizarSaldoConsolidadoCommandHandler(
     RedisCacheService cache,
     IRedisLockService lockService,
@@ -629,14 +629,14 @@ public class AtualizarSaldoConsolidadoCommandHandler(
 }
 ```
 
-**Por que TTL de 30 dias (e não 60 segundos)?**
+**Why 30-day TTL (not 60 seconds)?**
 
-Com a estratégia event-driven, o cache é atualizado *a cada lançamento registrado* — não expira passivamente. TTL longo significa que registros históricos (dias anteriores) ficam disponíveis sem cold start, enquanto o dia corrente é sempre fresco via evento.
+With event-driven strategy, cache is updated *at each entry registered* — doesn't expire passively. Long TTL means historical records (previous days) remain available without cold start, while current day is always fresh via event.
 
-#### Implementação C# — Outbox Pattern (garante entrega mesmo com crash)
+#### C# Implementation — Outbox Pattern (guarantees delivery even with crash)
 
 ```csharp
-// Lancamentos.Infrastructure/Outbox/OutboxPublisher.cs
+// Entry.Infrastructure/Outbox/OutboxPublisher.cs
 public sealed class OutboxPublisher(
     AppDbContext db,
     IPublishEndpoint bus,
@@ -651,9 +651,9 @@ public sealed class OutboxPublisher(
         }
     }
 
-    private async Task PublicarEventosPendentesAsync(CancellationToken ct)
+    private async Task PublishPendingEventsAsync(CancellationToken ct)
     {
-        var pendentes = await db.OutboxMessages
+        var pending = await db.OutboxMessages
             .Where(m => m.PublicadoEm == null)
             .OrderBy(m => m.CriadoEm)
             .Take(50)
@@ -664,16 +664,16 @@ public sealed class OutboxPublisher(
             try
             {
                 var evento = JsonSerializer.Deserialize<LancamentoRegistrado>(msg.Payload)!;
-                await bus.Publish(evento, ct);
+                await bus.Publish(@event, ct);
 
                 msg.PublicadoEm = DateTimeOffset.UtcNow;
                 await db.SaveChangesAsync(ct);
 
-                logger.LogInformation("Evento publicado: {EventoId}", msg.Id);
+                logger.LogInformation("Event published: {EventId}", msg.Id);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Falha ao publicar evento Outbox {EventoId}", msg.Id);
+                logger.LogError(ex, "Failed to publish Outbox event {EventId}", msg.Id);
                 // Não marca como publicado → será retentado no próximo ciclo
             }
         }
@@ -681,98 +681,98 @@ public sealed class OutboxPublisher(
 }
 ```
 
-#### Por que Outbox é Crítico neste Modelo?
+#### Why Outbox is Critical in This Model?
 
 ```
-PROBLEMA SEM OUTBOX:
-├─ POST /lancamentos → INSERT PostgreSQL ✅
-├─ Publish RabbitMQ → FALHA (network timeout, broker down) ❌
-├─ Cache NÃO é atualizado
-├─ GET /consolidado retorna saldo desatualizado
-└─ Violação do SLA de consistência (dado financeiro incorreto)
+PROBLEM WITHOUT OUTBOX:
+├─ POST /entries → INSERT PostgreSQL ✅
+├─ Publish RabbitMQ → FAILS (network timeout, broker down) ❌
+├─ Cache NOT updated
+├─ GET /consolidated returns stale balance
+└─ Violation of consistency SLA (incorrect financial data)
 
-SOLUÇÃO COM OUTBOX:
-├─ POST /lancamentos → INSERT PostgreSQL + INSERT Outbox (mesma transação)
-├─ Se Publish falha → OutboxPublisher retenta em background
-├─ Cache É atualizado quando broker voltar
-└─ Consistência eventual garantida (at-least-once)
+SOLUTION WITH OUTBOX:
+├─ POST /entries → INSERT PostgreSQL + INSERT Outbox (same transaction)
+├─ If Publish fails → OutboxPublisher retries in background
+├─ Cache IS updated when broker returns
+└─ Eventual consistency guaranteed (at-least-once)
 
-PROTEÇÃO ADICIONAL — Dead Letter Queue (DLQ):
-├─ Consumer falha 3× → mensagem vai para DLQ
-├─ Alerta dispara (Prometheus → Grafana)
-├─ SRE investiga + replay manual da DLQ
-└─ Cache restaurado sem perda de dados
-```
-
----
-
-### Justificativa dos Componentes Tecnológicos
-
-#### 1. PostgreSQL (Banco de Dados Transacional)
-
-```
-Volumetria: 1.466.000 registros em 10 anos = 2 GB com índices
-Concorrência: Baixa (~2 escrita/s, 5-10 leitura/s para consolidado)
-Transações: ACID crítico (débito/crédito deve ser confiável)
-Replicação: Simples (1 master + 1 standby para HA)
-
-Justificativa:
-✅ Espaço: 2 GB é negligenciável
-✅ Performance: Índices suficientes para 2 B-trees
-✅ Confiabilidade: ACID nativo = perfekt para operações financeiras
-✅ Escalabilidade: Não precisa sharding em 10 anos
-✅ Custo: Open source, baixo TCO
-
-Alternativas rejeitadas:
-❌ MongoDB: Sem ACID (versão 4.0+, mas complexo para este caso)
-❌ CosmosDB: Overkill, serverless, mais caro
-❌ Cassandra: Requer 3-5 nós, complexidade desnecessária
+ADDITIONAL PROTECTION — Dead Letter Queue (DLQ):
+├─ Consumer fails 3× → message goes to DLQ
+├─ Alert fires (Prometheus → Grafana)
+├─ SRE investigates + manual DLQ replay
+└─ Cache restored without data loss
 ```
 
 ---
 
-#### 2. Redis (Cache Distribuído)
+### Justification of Technology Components
+
+#### 1. PostgreSQL (Transactional Database)
 
 ```
-Requisição GET /consolidado:
-├─ 50 req/s = 180.000 req/hora
-├─ Cache hit rate esperado: 95% (saldo muda raramente)
-└─ Reduz para DB: ~9.000 req/hora = 2,5 req/s
+Volume: 1,466,000 records in 10 years = 2 GB with indexes
+Concurrency: Low (~2 writes/s, 5-10 reads/s for consolidated)
+Transactions: ACID critical (debit/credit must be reliable)
+Replication: Simple (1 master + 1 standby for HA)
 
-Sem cache:
-├─ 50 req/s × 20ms (latência DB) = 1.000ms/s overhead
-├─ CPU database: ~50% em picos
-├─ Resposta média: 20-50ms
+Rationale:
+✅ Space: 2 GB is negligible
+✅ Performance: Indexes sufficient for 2 B-trees
+✅ Reliability: Native ACID = perfect for financial operations
+✅ Scalability: No sharding needed in 10 years
+✅ Cost: Open source, low TCO
 
-Com cache Redis:
-├─ 50 req/s × 2ms (latência cache) = 100ms/s overhead
-├─ Cache miss (5%): query BD normalmente
-├─ Resposta média: 2-5ms (HIT), 20-50ms (MISS)
-
-Economias de recursos:
+Rejected alternatives:
+❌ MongoDB: No ACID (version 4.0+, but complex for this case)
+❌ CosmosDB: Overkill, serverless, more expensive
+❌ Cassandra: Requires 3-5 nodes, unnecessary complexity
 ```
-Query ao BD:        50 req/s  →  2,5 req/s (-95%)
-CPU Database:       50%       →  5% (-90%)
-Latência P99:       50ms      →  5ms (-90%)
-Carga de rede:      50 req/s  →  2,5 req/s (-95%)
 
-Cálculo de memória Redis necessária:
-├─ Consolidado por dia: ~200 bytes
-├─ Guarda 90 dias (3 meses): 200 bytes × 90 = 18 KB
-├─ Com margem para TTL overlap: ~50 KB
+---
+
+#### 2. Redis (Distributed Cache)
+
+```
+Request GET /consolidated:
+├─ 50 req/s = 180,000 req/hour
+├─ Expected cache hit rate: 95% (balance changes rarely)
+└─ Reduces to DB: ~9,000 req/hour = 2.5 req/s
+
+Without cache:
+├─ 50 req/s × 20ms (DB latency) = 1,000ms/s overhead
+├─ Database CPU: ~50% at peaks
+├─ Average response: 20-50ms
+
+With Redis cache:
+├─ 50 req/s × 2ms (cache latency) = 100ms/s overhead
+├─ Cache miss (5%): query DB normally
+├─ Average response: 2-5ms (HIT), 20-50ms (MISS)
+
+Resource savings:
+```
+Query to DB:        50 req/s  →  2.5 req/s (-95%)
+Database CPU:       50%       →  5% (-90%)
+P99 Latency:        50ms     →  5ms (-90%)
+Network load:       50 req/s  →  2.5 req/s (-95%)
+
+Redis memory calculation needed:
+├─ Consolidated per day: ~200 bytes
+├─ Stores 90 days (3 months): 200 bytes × 90 = 18 KB
+├─ With margin for TTL overlap: ~50 KB
 └─ Total: <<< 100 MB
 
-Status: ✅ Micro-instância Redis suficiente
-        ✅ Custo negligenciável
-        ✅ ROI extremamente alto (reduz carga em 90%)
+Status: ✅ Micro-instance Redis sufficient
+        ✅ Negligible cost
+        ✅ Extremely high ROI (reduces load by 90%)
 ```
 
-**Alternativas rejeitadas:**
+**Rejected alternatives:**
 ```
-❌ Memcached: Sem persistência, sem estruturas complexas
-❌ Elasticsearch: Overkill, voltado para buscas complexas
-❌ VarnishCache: Necessário proxy reverso extra
-✅ Redis: Simples, rápido, confiável, com Pub/Sub para eventos
+❌ Memcached: No persistence, no complex structures
+❌ Elasticsearch: Overkill, focused on complex searches
+❌ VarnishCache: Requires additional reverse proxy
+✅ Redis: Simple, fast, reliable, with Pub/Sub for events
 ```
 
 ---
@@ -780,49 +780,49 @@ Status: ✅ Micro-instância Redis suficiente
 #### 3. RabbitMQ / Message Queue (Event Bus)
 
 ```
-Cenário de pico - 50 req/s de consolidado:
+Peak scenario - 50 req/s of consolidated:
 
-Sem queue (sincronizado):
-├─ Cliente → API Consolidado → Query BD (20ms)
-└─ Timeout se BD cair = SERVIÇO CAI
+Without queue (synchronized):
+├─ Client → Consolidated API → DB Query (20ms)
+└─ Timeout if DB fails = SERVICE FAILS
 
-Com queue (assincronizado):
-├─ Lançamento → Publica evento
-├─ Evento vai para RabbitMQ (local, ultra-rápido)
-├─ Consolidado Consumer processa em background
-└─ Se Consolidado cair, eventos permanecem enfileirados
+With queue (asynchronous):
+├─ Entry → Publishes event
+├─ Event goes to RabbitMQ (local, ultra-fast)
+├─ Consolidated Consumer processes in background
+└─ If Consolidated fails, events remain queued
 
-Volumetria de fila:
-├─ 200 lançamentos/dia = 200 eventos/dia
-├─ Tamanho evento: ~500 bytes
-├─ Armazenamento necessário: 200 × 500 bytes = 100 KB/dia
-├─ Em 30 dias (capacidade buffer): 3 MB
-└─ RabbitMQ com 1 GB de RAM = 1000x de capacidade
+Queue volume:
+├─ 200 entries/day = 200 events/day
+├─ Event size: ~500 bytes
+├─ Storage needed: 200 × 500 bytes = 100 KB/day
+├─ Over 30 days (buffer capacity): 3 MB
+└─ RabbitMQ with 1 GB RAM = 1000x capacity
 
-Benefícios quantificáveis:
-✅ Resiliência: Lançamentos funciona mesmo se consolidado cair
-✅ Performance: Lançamentos retorna em <50ms (sem esperar consolidado)
-✅ Confiabilidade: Fila persiste, garante entrega (retry)
-✅ Escalabilidade: Múltiplos consumers processam em paralelo
-✅ Custo: Overhead negligenciável
+Quantifiable benefits:
+✅ Resilience: Entry works even if consolidated fails
+✅ Performance: Entry returns in <50ms (without waiting for consolidated)
+✅ Reliability: Queue persists, guarantees delivery (retry)
+✅ Scalability: Multiple consumers process in parallel
+✅ Cost: Negligible overhead
 
-Cálculo de consumers necessários:
-├─ 200 eventos/dia ÷ (16h × 3600s) = 0,003 eventos/s
-├─ Processamento: ~100ms por evento
-├─ 1 consumer suficiente para volumes normais
-└─ Com auto-scaling: até 5 consumers para picos
+Calculation of needed consumers:
+├─ 200 events/day ÷ (16h × 3600s) = 0.003 events/s
+├─ Processing: ~100ms per event
+├─ 1 consumer sufficient for normal volumes
+└─ With auto-scaling: up to 5 consumers for peaks
 
-Status: ✅ RabbitMQ com 1 instância suficiente
-        ✅ Custo baixo (~$10-20/mês cloud)
-        ✅ Garante requisito de resiliência
+Status: ✅ RabbitMQ with 1 instance sufficient
+        ✅ Low cost (~$10-20/month cloud)
+        ✅ Ensures resilience requirement
 ```
 
-**Alternativas rejeitadas:**
+**Rejected alternatives:**
 ```
-❌ Kafka: Complexidade desnecessária (multi-partition, rebalance)
-❌ AWS SQS: Vendor lock-in,complexidade, maior latência
-❌ Azure Service Bus: Vendo lock-in, complexidade, custo maior
-✅ RabbitMQ: Simples, confiável, self-hosted, open source
+❌ Kafka: Unnecessary complexity (multi-partition, rebalance)
+❌ AWS SQS: Vendor lock-in, complexity, higher latency
+❌ Azure Service Bus: Vendor lock-in, complexity, higher cost
+✅ RabbitMQ: Simple, reliable, self-hosted, open source
 ```
 
 ---
@@ -830,239 +830,239 @@ Status: ✅ RabbitMQ com 1 instância suficiente
 #### 4. Load Balancer (API Gateway)
 
 ```
-Tráfego diário:
-├─ Escrita: 200 req/dia
-├─ Leitura: 2.880.000 req/dia (50 req/s × 16h × 3600)
-├─ Total: 2.880.200 req/dia = 33.3 req/s em média
+Daily traffic:
+├─ Writes: 200 req/day
+├─ Reads: 2,880,000 req/day (50 req/s × 16h × 3600)
+├─ Total: 2,880,200 req/day = 33.3 req/s average
 
-Pico estimado (Hora de pico):
-├─ 50 req/s sustentado (conforme spec)
-├─ +20% de margem para burst = 60 req/s
+Estimated peak (Peak hour):
+├─ 50 req/s sustained (per spec)
+├─ +20% margin for burst = 60 req/s
 
-Distribuição em 2 instâncias de Consolidado:
-├─ 60 req/s ÷ 2 = 30 req/s por instância
-├─ Latência processamento: 2-5ms (com cache)
-├─ Throughput por instância: 100+ req/s (capacidade)
-└─ Utilização: 30% (muito confortável)
+Distribution across 2 Consolidated instances:
+├─ 60 req/s ÷ 2 = 30 req/s per instance
+├─ Processing latency: 2-5ms (with cache)
+├─ Throughput per instance: 100+ req/s (capacity)
+└─ Utilization: 30% (very comfortable)
 
 Health checks & Rate Limiting:
-├─ Verificar saúde a cada 10 segundos
-├─ Rate limit: 60 req/s por cliente
-├─ Burst allowance: até 120 req/s por 10 segundos
-└─ Rejeição graceful (não afeta outros clientes)
+├─ Check health every 10 seconds
+├─ Rate limit: 60 req/s per client
+├─ Burst allowance: up to 120 req/s per 10 seconds
+└─ Graceful rejection (doesn't affect other clients)
 
-Componentes de LB necessários:
+Necessary LB components:
 ├─ 1x Load Balancer (Nginx/HAProxy/Azure LB)
-├─ 2x Instâncias Consolidado Service
-├─ 2x Instâncias Lançamento Service
+├─ 2x Consolidated Service Instances
+├─ 2x Entry Service Instances
 └─ Auto-scaling rules (CPU > 70%)
 
-Status: ✅ Dois servidores nginx suficientes
-        ✅ Custo: ~$20-50/mês
-        ✅ Garante 99.9% disponibilidade
+Status: ✅ Two nginx servers sufficient
+        ✅ Cost: ~$20-50/month
+        ✅ Ensures 99.9% availability
 ```
 
 ---
 
-### Resumo Quantitativo - 10 Anos
+### Quantitative Summary - 10 Years
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│           VOLUMETRIA CONSOLIDADA - 10 ANOS             │
+│           CONSOLIDATED VOLUMETRY - 10 YEARS            │
 ├────────────────────────────────────────────────────────┤
-│ Lançamentos registrados:    1.466.080                  │
-│ Espaço BD necessário:       2,0 GB                     │
-│ Requisições consolidado:    1.036.872.000/ano          │
-│ Requisições pico:           50 req/s (consistente)     │
-│ Requisições escrita:        <2 req/s (baixo)           │
-│ Taxa leitura:escrita:       14.400:1                   │
+│ Entries registered:         1,466,080                │
+│ DB space needed:            2.0 GB                  │
+│ Consolidated requests:      1,036,872,000/year      │
+│ Peak requests:              50 req/s (consistent)   │
+│ Write requests:             <2 req/s (low)          │
+│ Read:Write ratio:           14,400:1                │
 ├────────────────────────────────────────────────────────┤
-│ DECISÕES TECNOLÓGICAS JUSTIFICADAS:                    │
+│ JUSTIFIED TECHNOLOGY DECISIONS:                     │
 ├────────────────────────────────────────────────────────┤
-│ ✅ PostgreSQL:              2 GB = Negligenciável      │
-│ ✅ Redis:                   <100 MB = Mínimo           │
-│ ✅ RabbitMQ:                <1 GB RAM = Suficiente     │
-│ ✅ Microserviços:           Escalabilidade futura      │
-│ ✅ CQRS:                    Otimiza 50 req/s separado  │
-│ ✅ Cache + Circuit Breaker: 95% HIT rate, resiliência │
-│ ✅ Sem sharding:            10 anos com 1 BD           │
-│ ✅ Sem cluster complexo:    Arquitetura simples        │
+│ ✅ PostgreSQL:              2 GB = Negligible      │
+│ ✅ Redis:                   <100 MB = Minimum      │
+│ ✅ RabbitMQ:                <1 GB RAM = Sufficient │
+│ ✅ Microservices:           Future scalability     │
+│ ✅ CQRS:                    Optimizes 50 req/s sep │
+│ ✅ Cache + Circuit Breaker: 95% HIT rate, resilience│
+│ ✅ No sharding:             10 years with 1 DB      │
+│ ✅ No complex cluster:      Simple architecture    │
 └────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Justificativas Tecnológicas
+## Technology Justifications
 
-Com base na análise de volumetria acima, aqui estão as decisões arquiteturais **quantificadas**:
+Based on the volumetry analysis above, here are the **quantified** architectural decisions:
 
-### Por que Microserviços?
+### Why Microservices?
 
-| Métrica | Impacto |
+| Metric | Impact |
 |---------|--------|
-| **Taxa leitura:escrita** | 8.333:1 → Leitura e escrita precisam escalar separadamente |
-| **Padrão de crescimento** | 15% a.a. com base em 50 req/s → Fluxo previsível |
-| **Resiliência crítica** | Lançamentos não pode cair se consolidado falha |
-| **Independência operacional** | Cada serviço tem SLA diferente |
-| **Escalabilidade horizontal** | Adicionar servidores Consolidado sem tocar em Lançamentos |
+| **Read:Write ratio** | 8,333:1 → Reads and writes need to scale separately |
+| **Growth pattern** | 15% annually based on 50 req/s → Predictable flow |
+| **Critical resilience** | Entry cannot fail if consolidated fails |
+| **Operational independence** | Each service has different SLA |
+| **Horizontal scalability** | Add Consolidated servers without touching Entry |
 
-**Resultado:** Cada serviço escalável, deployável e reparável de forma independente. Com 2 servidores de Consolidado, cada um suporta 25 req/s confortavelmente (50% utilização).
+**Result:** Each service scalable, deployable, and repairable independently. With 2 Consolidated servers, each handles 25 req/s comfortably (50% utilization).
 
 ---
 
-### Por que Redis Cache é ESSENCIAL?
+### Why Redis Cache is ESSENTIAL?
 
 ```
-SEM CACHE → 50 req/s → 50 queries ao PostgreSQL → CPU 70%+ → COLAPSO
-COM CACHE → 50 req/s → 2,5 queries ao PostgreSQL → CPU 15% → ROBUSTO
+WITHOUT CACHE → 50 req/s → 50 queries to PostgreSQL → CPU 70%+ → COLLAPSE
+WITH CACHE → 50 req/s → 2.5 queries to PostgreSQL → CPU 15% → ROBUST
 ```
 
-| Métrica | Impacto Quantificado |
+| Metric | Quantified Impact |
 |---------|----------------------|
-| **Redução queries BD** | 50 → 2,5 req/s (-95%) |
-| **Redução CPU Database** | 70% → 15% (-75%) |
-| **Melhoria latência P99** | 50ms → 5ms (-90%) |
-| **Escalabilidade BD** | Até 100 req/s → Até 500+ req/s (+400%) |
-| **Hit rate esperado** | 95% (saldo não muda a cada segundo) |
-| **Memória necessária** | <100 MB (negligenciável) |
-| **Custo mensal** | $5-10 |
+| **DB query reduction** | 50 → 2.5 req/s (-95%) |
+| **Database CPU reduction** | 70% → 15% (-75%) |
+| **P99 latency improvement** | 50ms → 5ms (-90%) |
+| **DB scalability** | Up to 100 req/s → Up to 500+ req/s (+400%) |
+| **Expected hit rate** | 95% (balance doesn't change every second) |
+| **Memory needed** | <100 MB (negligible) |
+| **Monthly cost** | $5-10 |
 
-**Resultado:** Redis é **MANDATÓRIO** para atingir 50 req/s sustentado. Sem cache, o sistema colapsaria com 60-70 req/s.
+**Result:** Redis is **MANDATORY** to reach sustained 50 req/s. Without cache, system would collapse at 60-70 req/s.
 
 ---
 
-### Por que PostgreSQL (não DynamoDB/Cassandra)?
+### Why PostgreSQL (not DynamoDB/Cassandra)?
 
-| Aspecto | PostgreSQL | DynamoDB | Cassandra |
+| Aspect | PostgreSQL | DynamoDB | Cassandra |
 |--------|-----------|----------|-----------|
-| **ACID Garantido** | ✅ 100% | ⚠️ Limitado | ❌ Eventual |
-| **Escrita (0,006 req/s)** | ✅ Overkill | ❌ Overkill | ❌ Overkill |
-| **Armazenamento 10 anos** | 482 MB | 482 MB | 482 MB |
-| **Queries BD necessárias** | 2,5 req/s (95% cache) | Overkill | Overkill |
-| **Setup complexity** | Simples | Média | Complexa |
-| **Custo** | $15-25/mês | $50+/mês | $100+/mês |
-| **Adequado financeiro?** | ✅ Perfeito | ❌ Não | ❌ Não |
+| **ACID Guaranteed** | ✅ 100% | ⚠️ Limited | ❌ Eventual |
+| **Writes (0.006 req/s)** | ✅ Overkill | ❌ Overkill | ❌ Overkill |
+| **10-year storage** | 482 MB | 482 MB | 482 MB |
+| **DB queries needed** | 2.5 req/s (95% cache) | Overkill | Overkill |
+| **Setup complexity** | Simple | Medium | Complex |
+| **Cost** | $15-25/month | $50+/month | $100+/month |
+| **Suitable for finance?** | ✅ Perfect | ❌ No | ❌ No |
 
-**Resultado:** PostgreSQL é a escolha óbvia: máxima confiabilidade para operações financeiras com mínima complexidade e custo.
+**Result:** PostgreSQL is the obvious choice: maximum reliability for financial operations with minimal complexity and cost.
 
 ---
 
-### Por que RabbitMQ (não Kafka/AWS SQS)?
+### Why RabbitMQ (not Kafka/AWS SQS)?
 
 ```
-VOLUME: 350 eventos/dia (negligenciável)
-PADRÃO: Assincronismo puro (publicador não espera resposta)
-NECESSIDADE: Garantir que Lançamentos funcione mesmo se Consolidado cair
+VOLUME: 350 events/day (negligible)
+PATTERN: Pure asynchronism (publisher doesn't wait for response)
+NEED: Ensure Entry works even if Consolidated fails
 ```
 
-| Métrica | RabbitMQ | Kafka | AWS SQS |
+| Metric | RabbitMQ | Kafka | AWS SQS |
 |---------|----------|-------|---------|
-| **Setup time** | 30 min | 2-4 horas | Via console |
-| **Curva aprendizado** | Baixa | Média | Média |
-| **Customização** | Fácil | Difícil | Limitada |
-| **Vendor lock-in** | ❌ Não | ❌ Não | ✅ Sim |
-| **Dead Letter Queue** | ✅ Nativo | ⚠️ Plugin | ✅ Nativo |
-| **Para 350 eventos/dia** | ✅ Perfeito | ❌ Overkill | ⚠️ Adequado |
-| **Custo** | $10-15/mês | $20+/mês | $25+/mês |
+| **Setup time** | 30 min | 2-4 hours | Via console |
+| **Learning curve** | Low | Medium | Medium |
+| **Customization** | Easy | Hard | Limited |
+| **Vendor lock-in** | ❌ No | ❌ No | ✅ Yes |
+| **Dead Letter Queue** | ✅ Native | ⚠️ Plugin | ✅ Native |
+| **For 350 events/day** | ✅ Perfect | ❌ Overkill | ⚠️ Adequate |
+| **Cost** | $10-15/month | $20+/month | $25+/month |
 
-**Resultado:** RabbitMQ oferece melhor custo-benefício com máxima flexibilidade e portabilidade.
+**Result:** RabbitMQ offers best value with maximum flexibility and portability.
 
 ---
 
-### Por que Kong (ou Nginx/HAProxy) para API Gateway?
+### Why Kong (or Nginx/HAProxy) for API Gateway?
 
-Kong é uma **excelente opção** para este cenário. Aqui está a análise completa:
+Kong is an **excellent option** for this scenario. Here's the complete analysis:
 
 ```
-REQUISITO: Distribuir 50 req/s entre 2 servidores Consolidado + 1 Lançamentos
-           = 25 req/s cada (Consolidado)
-           = 0,1 req/s (Lançamentos)
-CRITÉRIO: Rate limiting, Health checks, Logging, Auth, Request routing
+REQUIREMENT: Distribute 50 req/s across 2 Consolidated servers + 1 Entry
+           = 25 req/s each (Consolidated)
+           = 0.1 req/s (Entry)
+CRITERIA: Rate limiting, Health checks, Logging, Auth, Request routing
 ```
 
-| Critério | Nginx | HAProxy | AWS ALB | Kong Gateway | Kong Enterprise |
+| Criteria | Nginx | HAProxy | AWS ALB | Kong Gateway | Kong Enterprise |
 |----------|-------|---------|---------|--------------|-----------------|
 | **Setup Time** | 15 min | 20 min | 5 min | 30 min | 1h |
-| **Curva Aprendizado** | Baixa | Média | Baixa | Média-Alta | Alta |
-| **Rate Limiting Nativo** | ⚠️ Via módulo | ✅ Nativo | ✅ Via WAF | ✅ Nativo + Plugins | ✅ Avançado |
-| **Health Checks** | ✅ Passivo | ✅ Ativo | ✅ Ativo | ✅ Completo | ✅ Completo |
-| **Circuit Breaker** | ❌ Não | ❌ Não | ❌ Não | ✅ Nativo | ✅ Nativo |
-| **Authentication/Authz** | ⚠️ Via módulo | ⚠️ Via módulo | ⚠️ Via WAF | ✅ Plugins (OAuth2, JWT, Basic) | ✅ Plugins (OAuth2, JWT, mTLS) |
-| **Request Logging** | ✅ Bom | ✅ Bom | ✅ Bom | ✅ Estruturado | ✅ Completo |
-| **Request Tracing** | ❌ Não | ❌ Não | ⚠️ X-Ray | ✅ Suporta OpenTelemetry | ✅ OpenTelemetry + Plugins |
+| **Learning Curve** | Low | Medium | Low | Medium-High | High |
+| **Native Rate Limiting** | ⚠️ Via module | ✅ Native | ✅ Via WAF | ✅ Native + Plugins | ✅ Advanced |
+| **Health Checks** | ✅ Passive | ✅ Active | ✅ Active | ✅ Complete | ✅ Complete |
+| **Circuit Breaker** | ❌ No | ❌ No | ❌ No | ✅ Native | ✅ Native |
+| **Authentication/Authz** | ⚠️ Via module | ⚠️ Via module | ⚠️ Via WAF | ✅ Plugins (OAuth2, JWT, Basic) | ✅ Plugins (OAuth2, JWT, mTLS) |
+| **Request Logging** | ✅ Good | ✅ Good | ✅ Good | ✅ Structured | ✅ Complete |
+| **Request Tracing** | ❌ No | ❌ No | ⚠️ X-Ray | ✅ Supports OpenTelemetry | ✅ OpenTelemetry + Plugins |
 | **Load Balancing Algos** | 5 (round-robin, least conn, etc) | 8+ | 3 (round-robin, least outstanding) | 7 (inclusive rate limiting aware) | 10+ |
-| **Vendor Lock-in** | ❌ Não | ❌ Não | ✅ Sim (AWS) | ❌ Não (Open Source) | ⚠️ Sim (Kong Cloud) |
-| **Para 50 req/s** | ✅ Overkill | ✅ Overkill | ✅ Overkill | ✅ Perfeito | ✅ Enterprise overkill |
-| **Cost (Infrastructure)** | $5-10/mês | $5-10/mês | $50+/mês | $10-15/mês (self-hosted) | $500+/mês (Cloud) |
-| **Cost (Operational)** | Baixo | Baixo | Médio | Médio | Alto |
+| **Vendor Lock-in** | ❌ No | ❌ No | ✅ Yes (AWS) | ❌ No (Open Source) | ⚠️ Yes (Kong Cloud) |
+| **For 50 req/s** | ✅ Overkill | ✅ Overkill | ✅ Overkill | ✅ Perfect | ✅ Enterprise overkill |
+| **Cost (Infrastructure)** | $5-10/month | $5-10/month | $50+/month | $10-15/month (self-hosted) | $500+/month (Cloud) |
+| **Cost (Operational)** | Low | Low | Medium | Medium | High |
 | **Container Ready** | ✅ Docker | ✅ Docker | ❌ AWS only | ✅ Docker + K8s | ✅ Docker + K8s |
-| **Kubernetes Native** | ⚠️ Ingress | ⚠️ Ingress | ❌ Não | ✅ Ingress Controller | ✅ Ingress Controller |
+| **Kubernetes Native** | ⚠️ Ingress | ⚠️ Ingress | ❌ No | ✅ Ingress Controller | ✅ Ingress Controller |
 | **Monitoring/Observability** | ⚠️ Via Prometheus export | ⚠️ Via Prometheus export | ✅ CloudWatch native | ✅ Admin API + Metrics | ✅ Admin API + Observability |
-| **Escalabilidade em 10 anos** | ✅ Suficiente | ✅ Suficiente | ⚠️ Vendor | ✅ Escalável | ✅ Enterprise grade |
+| **Scalability in 10 years** | ✅ Sufficient | ✅ Sufficient | ⚠️ Vendor | ✅ Scalable | ✅ Enterprise grade |
 
-#### Análise por Cenário
+#### Analysis by Scenario
 
-**Cenário 1: Self-Hosted Simple (Recomendado para MVP)**
+**Scenario 1: Self-Hosted Simple (Recommended for MVP)**
 ```
-✅ RECOMENDAÇÃO: Nginx + Lua ou Kong Gateway (Open Source)
+✅ RECOMMENDATION: Nginx + Lua or Kong Gateway (Open Source)
 
-Razão: Simplicidade + Funcionalidade balanceada
-├─ Nginx: Leve, rápido, bem conhecido (15 min setup)
-└─ Kong: Mais features, plugins, facilita future roadmap (30 min setup)
+Reason: Simplicity + Balanced functionality
+├─ Nginx: Light, fast, well-known (15 min setup)
+└─ Kong: More features, plugins, facilitates future roadmap (30 min setup)
 
-Para 50 req/s: Ambos fazem com folga
-├─ Nginx: <1% CPU por servidor
-└─ Kong: ~2-5% CPU por servidor
+For 50 req/s: Both do it with ease
+├─ Nginx: <1% CPU per server
+└─ Kong: ~2-5% CPU per server
 
-Recomendação: KONG (justificativa abaixo)
-```
-
-**Cenário 2: Produção com Escalabilidade (Recomendado para escala)**
-```
-✅ RECOMENDAÇÃO: Kong Gateway (Self-hosted) + Kubernetes
-
-Razão: Plugins nativos resolvem problemas que Nginx demoraria a configurar
-├─ Rate Limiting: Kong tem, Nginx precisa módulo + Lua
-├─ Circuit Breaker: Kong tem, Nginx não tem
-├─ Request Tracing: Kong tem, Nginx não tem
-├─ mTLS: Kong tem, Nginx tem mas Kong é mais direto
-└─ Auth (OAuth2/JWT): Kong plugins, Nginx precisa módulo terceiro
-
-Crescimento 50 → 176 req/s:
-├─ Nginx: Precisaria refatoração
-└─ Kong: Simples add mais instâncias + plugins config
-
-Recomendação: KONG + KONG INGRESS CONTROLLER (K8s)
+Recommendation: KONG (justification below)
 ```
 
-**Cenário 3: AWS Only (Recomendado para AWS)**
+**Scenario 2: Production with Scalability (Recommended for scale)**
 ```
-⚠️ POSSÍVEL: AWS ALB + WAF
+✅ RECOMMENDATION: Kong Gateway (Self-hosted) + Kubernetes
 
-Razão: Integração nativa, mas menos flexibilidade
-├─ Vendor lock-in completo
-├─ Custo > Kong ($50+/mês vs $10-15/mês)
-├─ Rate limiting via WAF (complexo)
+Reason: Native plugins solve problems Nginx would take long to configure
+├─ Rate Limiting: Kong has, Nginx needs module + Lua
+├─ Circuit Breaker: Kong has, Nginx doesn't
+├─ Request Tracing: Kong has, Nginx doesn't
+├─ mTLS: Kong has, Nginx has but Kong is more direct
+└─ Auth (OAuth2/JWT): Kong plugins, Nginx needs third-party module
+
+Growth 50 → 176 req/s:
+├─ Nginx: Would need refactoring
+└─ Kong: Simple add more instances + plugins config
+
+Recommendation: KONG + KONG INGRESS CONTROLLER (K8s)
+```
+
+**Scenario 3: AWS Only (Recommended for AWS)**
+```
+⚠️ POSSIBLE: AWS ALB + WAF
+
+Reason: Native integration, but less flexibility
+├─ Complete vendor lock-in
+├─ Cost > Kong ($50+/month vs $10-15/month)
+├─ Rate limiting via WAF (complex)
 └─ Less features than Kong
 
-Recomendação: NÃO (A menos que empresa é 100% AWS)
+Recommendation: NO (Unless company is 100% AWS)
 ```
 
-#### Por que Kong é MELHOR para este projeto?
+#### Why Kong is BETTER for this project?
 
 ```
-KONG OFERECE:
+KONG OFFERS:
 
-1️⃣ Rate Limiting Inteligente
-   └─ Por IP, por user, por endpoint
-   └─ Crucial para 50 req/s sustentado com 5% máximo de perda
-   └─ Nginx: Precisa lua + módulo + configuração complexa
-   └─ Kong: Um plugin, pronto
+1️⃣ Intelligent Rate Limiting
+   └─ By IP, by user, by endpoint
+   └─ Crucial for sustained 50 req/s with max 5% loss
+   └─ Nginx: Needs lua + module + complex config
+   └─ Kong: One plugin, ready
 
-2️⃣ Circuit Breaker Nativo
-   └─ Se Consolidado cair, Kong date fallback automático
-   └─ Nginx: Precisa proxy upstream + config manual
-   └─ Kong: Kong circuit-breaker plugin, pronto
+2️⃣ Native Circuit Breaker
+   └─ If Consolidated fails, Kong gives automatic fallback
+   └─ Nginx: Needs proxy upstream + manual config
+   └─ Kong: Kong circuit-breaker plugin, ready
 
 3️⃣ Plugin Ecosystem
    └─ Auth (OAuth2, JWT, Basic, API Key)
@@ -1072,26 +1072,26 @@ KONG OFERECE:
 
 4️⃣ Kubernetes Ready
    └─ Kong Ingress Controller (native support)
-   └─ Nginx: Ingress, mas menos features
+   └─ Nginx: Ingress, but fewer features
    └─ Kong: Ingress + Plugins CRDs
 
-5️⃣ Request Routing Avançado
-   └─ Pode rotear por path, method, header, regex
-   └─ Essencial para quando adicionar novos endpoints
+5️⃣ Advanced Request Routing
+   └─ Can route by path, method, header, regex
+   └─ Essential for when adding new endpoints
 
-6️⃣ Admin API REST
-   └─ Configure Kong via API (não apenas YAML)
-   └─ Nginx: Precisa recarregar config (downtime potencial)
+6️⃣ REST Admin API
+   └─ Configure Kong via API (not just YAML)
+   └─ Nginx: Needs config reload (potential downtime)
    └─ Kong: Hot reload via API
 
 7️⃣ Observability Builtin
-   └─ Metrics Prometheus
+   └─ Prometheus Metrics
    └─ Request/Response Logging
    └─ Tracing (OpenTelemetry)
-   └─ Nginx: Precisa exporters terceiros
+   └─ Nginx: Needs third-party exporters
 ```
 
-#### Kong Setup para 50 req/s
+#### Kong Setup for 50 req/s
 
 ```yaml
 # docker-compose.yml - Kong API Gateway
@@ -1165,11 +1165,11 @@ volumes:
 #### Kong Configuration (via Admin API)
 
 ```bash
-# 1️⃣ Criar upstream (múltiplas instâncias de Consolidado)
+# 1️⃣ Create upstream (multiple Consolidated instances)
 curl -X POST http://localhost:8001/upstreams \
   -d "name=consolidado_backend"
 
-# 2️⃣ Adicionar targets (2 servidores Consolidado)
+# 2️⃣ Add targets (2 Consolidated servers)
 curl -X POST http://localhost:8001/upstreams/consolidado_backend/targets \
   -d "target=consolidado-1.example.com:5000" \
   -d "weight=50"
@@ -1178,130 +1178,130 @@ curl -X POST http://localhost:8001/upstreams/consolidado_backend/targets \
   -d "target=consolidado-2.example.com:5000" \
   -d "weight=50"
 
-# 3️⃣ Criar Service (abstração do upstream)
+# 3️⃣ Create Service (upstream abstraction)
 curl -X POST http://localhost:8001/services \
   -d "name=consolidado_service" \
   -d "host=consolidado_backend" \
   -d "port=5000" \
   -d "protocol=http"
 
-# 4️⃣ Criar Route (mapping de URL para service)
+# 4️⃣ Create Route (URL to service mapping)
 curl -X POST http://localhost:8001/services/consolidado_service/routes \
   -d "name=consolidado_route" \
   -d "paths=/api/consolidado" \
   -d "methods=GET"
 
-# 5️⃣ Adicionar Rate Limiting Plugin
+# 5️⃣ Add Rate Limiting Plugin
 curl -X POST http://localhost:8001/services/consolidado_service/plugins \
   -d "name=rate-limiting" \
   -d "config.minute=3000" \
   -d "config.policy=sliding_window" \
   -d "config.limit_by=ip"
 
-# 6️⃣ Adicionar Circuit Breaker Plugin
+# 6️⃣ Add Circuit Breaker Plugin
 curl -X POST http://localhost:8001/services/consolidado_service/plugins \
   -d "name=circuit-breaker" \
   -d "config.failure_threshold=50" \
   -d "config.recovery_threshold=50" \
   -d "config.name=consolidado_cb"
 
-# 7️⃣ Adicionar Logging Plugin
+# 7️⃣ Add Logging Plugin
 curl -X POST http://localhost:8001/services/consolidado_service/plugins \
   -d "name=http-log" \
   -d "config.http_endpoint=http://log-server:8080/logs" \
   -d "config.method=POST"
 
-# 8️⃣ Adicionar Health Check
+# 8️⃣ Add Health Check
 curl -X PATCH http://localhost:8001/upstreams/consolidado_backend \
   -d "healthchecks.active.http_path=/api/health" \
   -d "healthchecks.active.interval=10" \
   -d "healthchecks.active.timeout=5"
 ```
 
-#### Resultado Kong para 50 req/s
+#### Kong Result for 50 req/s
 
 ```
-VALIDAÇÃO: 50 req/s = 3.000 req/minuto
+VALIDATION: 50 req/s = 3,000 req/minute
 
-Com Kong Rate Limiting (3.000 req/min):
-├─ Exatamente no limite ✅
-├─ Margem de 20% para burst = 3.600 req/min ✅
-├─ Distribuição: 2 servidores × 1.800 req/min ✅
-├─ Utilização Kong: <1% CPU ✅
-├─ Latência adicionada: <2ms ✅
-└─ Feature: Circuit breaker automático ✅
+With Kong Rate Limiting (3,000 req/min):
+├─ Exactly at limit ✅
+├─ 20% margin for burst = 3,600 req/min ✅
+├─ Distribution: 2 servers × 1,800 req/min ✅
+├─ Kong Utilization: <1% CPU ✅
+├─ Added latency: <2ms ✅
+└─ Feature: Automatic circuit breaker ✅
 
-CONCLUSÃO: Kong é PERFEITO para 50 req/s sustentado
-```
-
----
-
-### Por que CQRS (Command Query Responsibility Segregation)?
-
-```
-Padrão de tráfego: 8.333 leituras : 1 escrita
-
-Sem CQRS:
-├─ Mesmo modelo otimizado para escrita E leitura (impossível)
-├─ Trade-offs prejudicam ambos
-└─ Cache descentralizado, inconsistências
-
-Com CQRS:
-├─ Write Model: Lançamentos otimizado para ACID
-├─ Read Model: Consolidado otimizado para 50 req/s com cache
-├─ Separação clara de responsabilidades
-└─ Cada um escala independentemente
-```
-
-**Resultado:** CQRS permite otimizar 50 req/s de leitura sem compromissar integridade de escrita.
-
----
-
-### Elasticidade: Crescimento Sustentável até 176 req/s
-
-```
-CRESCIMENTO COM 50 REQ/S BASE:
-
-Ano 1:   50 req/s  ÷ 2 servidores = 25 req/s cada (42% CPU)   ✅
-Ano 3:   66 req/s  ÷ 2 servidores = 33 req/s cada (56% CPU)   ✅
-Ano 5:   87 req/s  ÷ 3 servidores = 29 req/s cada (49% CPU)   ✅
-Ano 7:  116 req/s  ÷ 3 servidores = 39 req/s cada (65% CPU)   ✅
-Ano 10: 176 req/s  ÷ 4 servidores = 44 req/s cada (75% CPU)   ✅
-
-Modelo: Escala horizontal pura (add servidores)
-└─ Nenhum redesign necessário em 10 anos
-```
-
-**Resultado:** Arquitetura preparada para crescimento orgânico. Com crescimento de 15% a.a., passamos de 50 req/s para 176 req/s sem recargo arquitetural.
-
----
-
-### Histórico: Elasticidade - Quando Escalar?
-
-```
-CRESCIMENTO PROJETADO (baseado em crescimento de lançamentos):
-
-Ano 1:  200 lançamentos/dia  → 1 servidor
-Ano 3:  265 lançamentos/dia  → 1 servidor (CPU < 20%)
-Ano 5:  351 lançamentos/dia  → 1 servidor (CPU < 30%)
-Ano 7:  464 lançamentos/dia  → 2 servidores (pronto para crescer)
-Ano 10: 707 lançamentos/dia  → 2-3 servidores (balanceado)
-
-Requisições de LEITURA (50 req/s fixo):
-├─ Ano 1-10: Cache reduz para 2,5 req/s
-├─ Com 2 servidores: 1,25 req/s cada
-└─ Utilização: 30-40% cada (muito confortável)
-
-Status: ✅ Arquitetura pronta para crescimento sem redesign
+CONCLUSION: Kong is PERFECT for sustained 50 req/s
 ```
 
 ---
 
-### Por que começar com Monolito Modular (Vertical Slicing)?
+### Why CQRS (Command Query Responsibility Segregation)?
 
-Embora a arquitetura final proposta seja **Microserviços + Event-Driven**, o projeto **inicia como um Monolito Modular** com Vertical Slicing. Esta é uma decisão estratégica fundamentada em pragmatismo técnico e financeiro:
+```
+Traffic pattern: 8,333 reads : 1 write
 
-#### **Fase 1 (Ano 1): Monolito Modular com Wolverine**
+Without CQRS:
+├─ Same model optimized for writes AND reads (impossible)
+├─ Trade-offs harm both
+└─ Decentralized cache, inconsistencies
+
+With CQRS:
+├─ Write Model: Entry optimized for ACID
+├─ Read Model: Consolidated optimized for 50 req/s with cache
+├─ Clear separation of responsibilities
+└─ Each scales independently
+```
+
+**Result:** CQRS allows optimizing 50 req/s reads without compromising write integrity.
+
+---
+
+### Elasticity: Sustainable Growth up to 176 req/s
+
+```
+GROWTH WITH 50 REQ/S BASE:
+
+Year 1:   50 req/s  ÷ 2 servers = 25 req/s each (42% CPU)   ✅
+Year 3:   66 req/s  ÷ 2 servers = 33 req/s each (56% CPU)   ✅
+Year 5:   87 req/s  ÷ 3 servers = 29 req/s each (49% CPU)   ✅
+Year 7:  116 req/s  ÷ 3 servers = 39 req/s each (65% CPU)   ✅
+Year 10: 176 req/s  ÷ 4 servers = 44 req/s each (75% CPU)   ✅
+
+Model: Pure horizontal scaling (add servers)
+└─ No redesign needed in 10 years
+```
+
+**Result:** Architecture prepared for organic growth. With 15% annual growth, we go from 50 req/s to 176 req/s without architectural overhaul.
+
+---
+
+### History: Elasticity - When to Scale?
+
+```
+PROJECTED GROWTH (based on entry growth):
+
+Year 1:  200 entries/day  → 1 server
+Year 3:  265 entries/day  → 1 server (CPU < 20%)
+Year 5:  351 entries/day  → 1 server (CPU < 30%)
+Year 7:  464 entries/day  → 2 servers (ready to grow)
+Year 10: 707 entries/day  → 2-3 servers (balanced)
+
+READ Requests (fixed 50 req/s):
+├─ Year 1-10: Cache reduces to 2.5 req/s
+├─ With 2 servers: 1.25 req/s each
+└─ Utilization: 30-40% each (very comfortable)
+
+Status: ✅ Architecture ready for growth without redesign
+```
+
+---
+
+### Why Start with Modular Monolith (Vertical Slicing)?
+
+Although the proposed final architecture is **Microserviços + Event-Driven**, o projeto **inicia como um Monolito Modular** com Vertical Slicing. Esta é uma decisão estratégica fundamentada em pragmatismo técnico e financeiro:
+
+#### **Phase 1 (Year 1): Modular Monolith with Wolverine**
 
 ```
 Estrutura: Único processo .NET 10+ rodando todas as features
@@ -1328,7 +1328,7 @@ Limitações (aceitáveis no Ano 1):
 Métrica de Sucesso: Atingir 50 req/s sustentado com <30% CPU em 1 servidor
 ```
 
-#### **Fase 2 (Ano 3-5): Migração Gradual para Microserviços**
+#### **Phase 2 (Year 3-5): Gradual Migration to Microservices**
 
 ```
 Trigger para migração:
@@ -1354,7 +1354,7 @@ Resultado esperado (Ano 5):
 └─ Kong orquestrando requests + circuit breakers
 ```
 
-#### **Justificativa Econômica e Técnica**
+#### **Economic and Technical Justification**
 
 | Aspecto | Monolito Modular (Ano 1-2) | Microserviços (Ano 5+) |
 |--------|--------------------------|----------------------|
@@ -1374,13 +1374,13 @@ Resultado esperado (Ano 5):
 
 ---
 
-## Arquitetura Proposta: Microserviços + Event-Driven
+## Proposed Architecture: Microservices + Event-Driven
 
 ### Diagrama de Arquitetura
 
 ![Diagrama de Componentes - FinControl](Diagrama%20de%20componentes%20do%20projeto%20FinControl.drawio.png)
 
-### Por que esta abordagem?
+### Why this approach?
 
 | Aspecto | Benefício |
 |---------|-----------|
@@ -1392,7 +1392,7 @@ Resultado esperado (Ano 5):
 
 ---
 
-## Padrões Arquiteturais Aplicados
+## Applied Architectural Patterns
 
 ### 1. **Padrão de Microserviços**
 
@@ -1766,12 +1766,12 @@ Vantagem: Tudo relativo a "RegistrarDebito" está em UM lugar!
 
 ---
 
-## Estrutura de Pastas
+## Folder Structure
 
 **Estrutura real implementada** — Módulos independentes + building blocks compartilhados.
 
 ```
-arquitetura-backend-2026/
+architecture-backend-2026/
 ├── .docs/
 │   └── ARQUITETURA.md                          ← Este arquivo
 │
@@ -1937,7 +1937,7 @@ arquitetura-backend-2026/
 
 ---
 
-### Explicação da Organização
+### Organization Explanation
 
 **Estrutura por Vertical Slicing:**
 1. **`Features/`** - Cada caso de uso é uma pasta completa
@@ -1960,9 +1960,9 @@ arquitetura-backend-2026/
 
 ---
 
-## Implementação: Vertical Slicing com Wolverine + Minimal APIs
+## Implementation: Vertical Slicing with Wolverine + Minimal APIs
 
-### Por que Wolverine?
+### Why Wolverine?
 
 **Wolverine** é um Next-Generation .NET Mediator AND Message Bus construído por Jeremy D. Miller (criador do MediatR). Combina Command/Query Handler Pattern com Outbox Pattern, RabbitMQ nativo, e OpenTelemetry automático.
 
@@ -2003,7 +2003,7 @@ public class RegistrarDebitoHandler
 }
 ```
 
-### Exemplo Prático: Feature RegistrarDebito
+### Practical Example: RegistrarDebito Feature
 
 ```
 Features/
@@ -2138,7 +2138,7 @@ public class RegistrarDebitoHandlerTests
 }
 ```
 
-### Conectar Handler ao Endpoint (Minimal API)
+### Connect Handler to Endpoint (Minimal API)
 
 **LancamentosEndpoints.cs:**
 ```csharp
@@ -2293,7 +2293,7 @@ public class LoggingInterceptor
 
 ---
 
-## Componentes Principais
+## Main Components
 
 ### 1. Lancamentos Service (`FinControl.Lancamentos.API` + `FinControl.Lancamentos.Core`)
 
@@ -2486,9 +2486,9 @@ CREATE INDEX idx_outbox_messages_delivered_at
 
 ---
 
-## Fluxos de Dados
+## Data Flows
 
-### Fluxo 1: Registrar Lançamento
+### Flow 1: Register Transaction
 
 ```
 Cliente HTTP
@@ -2552,7 +2552,7 @@ LancamentoRegistradoConsumer (Consolidado.Worker)
 
 ---
 
-### Fluxo 2: Consultar Saldo Consolidado
+### Flow 2: Query Consolidated Balance
 
 ```
 Cliente HTTP
@@ -2598,7 +2598,7 @@ Response HTTP 200:
 
 ---
 
-### Fluxo 3: Pico de Requisições (50 req/s)
+### Flow 3: Peak Requests (50 req/s)
 
 ```
 50 Requisições/segundo
@@ -2626,9 +2626,9 @@ Total: Baixa latência, taxa de perda controlada
 
 ---
 
-## Requisitos Não-Funcionais
+## Non-Functional Requirements
 
-### 1. Resiliência
+### 1. Resilience
 
 | Cenário | Solução |
 |---------|---------|
@@ -2680,7 +2680,7 @@ CREATE INDEX CONCURRENTLY idx_lancamento_data_tipo
 
 ---
 
-### 3. Disponibilidade
+### 3. Availability
 
 ```
 Availability Target: 99.9% (High Availability)
@@ -2698,9 +2698,9 @@ Implementação:
 
 ---
 
-## Segurança
+## Security
 
-### 1. Autenticação
+### 1. Authentication
 
 Keycloak como Identity Provider. Configurado via `AddFinControlKeycloakAuth()` (building block `FinControl.Auth`):
 
@@ -2716,7 +2716,7 @@ builder.Services
     });
 ```
 
-### 2. Autorização
+### 2. Authorization
 
 ```csharp
 // Endpoints protegidos com .RequireAuthorization()
@@ -2725,7 +2725,7 @@ app.MapGet("/lancamentos",  handler).RequireAuthorization();
 app.MapGet("/consolidado/saldo/{data}", handler).RequireAuthorization();
 ```
 
-### 3. SubscriptionKeyMiddleware (segunda camada após Kong) — implementado
+### 3. SubscriptionKeyMiddleware (second layer after Kong) — implemented
 
 ```csharp
 // FinControl.Infrastructure/Middleware/SubscriptionKeyMiddleware.cs
@@ -2756,7 +2756,7 @@ Cliente → [Authorization: Bearer JWT]
 
 Kong valida na borda. O middleware garante que mesmo requisições que bypasser o gateway (testes internos, acesso direto à porta) sejam bloqueadas.
 
-### 4. Validação de Entrada (implementado)
+### 4. Input Validation (implemented)
 
 ```csharp
 // RegistrarLancamentoCommandValidator.cs
@@ -2778,7 +2778,7 @@ RuleFor(x => x.Descricao)
     .When(x => x.Modalidade == ModalidadeLancamento.Outros);
 ```
 
-### 4. Criptografia em Trânsito
+### 4. Encryption in Transit
 
 ```
 HTTPS/TLS 1.3 obrigatório
@@ -2802,7 +2802,7 @@ Internet (Ataques)
 │ ├─ Bloqueia XSS, Path Traversal                  │
 │ ├─ Detecta bots/scanners maliciosos              │
 │ ├─ DDoS básico (por IP)                         │
-│ └─ OWASP Top 10 proteção                        │
+│ └─ OWASP Top 10 protection                        │
 └─────────────────┬───────────────────────────────┘
                   ↓
 ┌─────────────────────────────────────────────────┐
@@ -3031,7 +3031,7 @@ networks:
 | **AWS WAF** | $50-500/mês | Médio | WAF apenas |
 | **Nginx + ModSec** | $0 | 8 horas | LB + WAF |
 
-**Conclusão:** Você tem **proteção equivalente a Cloudflare SEM PAGAR NADA!** ✅
+**Conclusion:** You have **protection equivalent to Cloudflare WITHOUT PAYING A THING!** ✅
 
 ---
 
@@ -3051,7 +3051,7 @@ networks:
 
 ## Key Vault & Secrets Management
 
-### Por que Key Vault é Crítico?
+### Why is Key Vault Critical?
 
 Você **NÃO DEVE** armazenar secrets (senhas, tokens, chaves) em código ou ambiente diretamente:
 
@@ -3063,7 +3063,7 @@ var connectionString = "Server=db;User Id=admin;Password=minha_senha_123;";
 var connectionString = await keyVaultClient.GetSecretAsync("db-connection-string");
 ```
 
-### Opção 1: Hashicorp Vault (RECOMENDADO PARA ON-PREMISES)
+### Option 1: Hashicorp Vault (RECOMMENDED FOR ON-PREMISES)
 
 **Hashicorp Vault** é um **secret vault open source** (tipo Azure Key Vault, mas on-premises):
 
@@ -3171,7 +3171,7 @@ public static class VaultKeys
 <PackageReference Include="VaultSharp" />
 ```
 
-### Opção 2: Azure Key Vault (SE FOR AZURE)
+### Option 2: Azure Key Vault (IF USING AZURE)
 
 Se você usar Azure:
 
@@ -3190,9 +3190,9 @@ app.Run();
 
 ---
 
-## Autenticação & Autorização Centralizadas
+## Centralized Authentication & Authorization
 
-### Por que Keycloak?
+### Why Keycloak?
 
 Você **PODE** usar JWT direto no ASP.NET Core, mas Keycloak oferece:
 
@@ -3302,9 +3302,9 @@ app.Run();
 
 ---
 
-## Monitoramento & Observabilidade
+## Monitoring & Observability
 
-### Arquitetura de Observabilidade Completa
+### Complete Observability Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -3328,7 +3328,7 @@ app.Run();
              Grafana (visualização)
 ```
 
-### Opção 1: Stack Nativa .NET + Open Source
+### Option 1: Native .NET Stack + Open Source
 
 **OpenTelemetry com .NET nativo:**
 
@@ -3477,7 +3477,7 @@ scrape_configs:
     metrics_path: '/metrics'
 ```
 
-### Opção 2: ELK Stack (Elasticsearch + Logstash + Kibana)
+### Option 2: ELK Stack (Elasticsearch + Logstash + Kibana)
 
 Para logs em **grande escala**, ELK é melhor:
 
@@ -3507,7 +3507,7 @@ kibana:
     - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
 ```
 
-### Comparativo: Qual Usar?
+### Comparison: Which One to Use?
 
 | Stack | Escalabilidade | Custo | Setup | Para |
 |-------|---|---|---|---|
@@ -3530,7 +3530,7 @@ kibana:
 └──────────────────────────────────────────┘
 ```
 
-### Dashboards Grafana (provisionados via JSON)
+### Grafana Dashboards (provisioned via JSON)
 
 ```
 Dashboard 1 (implementado): "FinControl — HTTP Requests" (uid: fincontrol-http-v1)
@@ -3551,9 +3551,9 @@ Grafana: 11.1.0 (pinado — versões 12+ têm breaking changes no provisioning)
 
 ---
 
-## Resumo: Infraestrutura Completa
+## Summary: Complete Infrastructure
 
-### Fase 1: Setup & Infraestrutura (Semana 1)
+### Phase 1: Setup & Infrastructure (Week 1)
 
 - [ ] Criar solução Visual Studio
 - [ ] Setup Docker Compose (PostgreSQL, RabbitMQ, Redis, Kong)
@@ -3571,7 +3571,7 @@ Grafana: 11.1.0 (pinado — versões 12+ têm breaking changes no provisioning)
 
 ---
 
-### Fase 2: Serviço de Lançamentos (Semana 2)
+### Phase 2: Lancamentos Service (Week 2)
 
 - [ ] Domain model (Aggregate Lancamento)
 - [ ] Repository pattern + EF Core DbContext
@@ -3589,7 +3589,7 @@ Grafana: 11.1.0 (pinado — versões 12+ têm breaking changes no provisioning)
 
 ---
 
-### Fase 3: Serviço de Consolidado (Semana 2-3)
+### Phase 3: Consolidado Service (Week 2-3)
 
 - [ ] Domain model (Aggregate Consolidado)
 - [x] Event consumer (RabbitMQ.Client direto — LancamentoRegistradoConsumer)
@@ -3609,7 +3609,7 @@ Grafana: 11.1.0 (pinado — versões 12+ têm breaking changes no provisioning)
 
 ---
 
-### Fase 4: Testes E2E & Performance (Semana 3-4)
+### Phase 4: E2E Tests & Performance (Week 3-4)
 
 - [ ] Testes end-to-end completos
 - [ ] Load testing (k6 ou JMeter) validando 50 req/s via Kong
@@ -3625,7 +3625,7 @@ Grafana: 11.1.0 (pinado — versões 12+ têm breaking changes no provisioning)
 
 ---
 
-### Fase 5: Observability & Documentação (Semana 4)
+### Phase 5: Observability & Documentation (Week 4)
 
 - [ ] Serilog + ELK stack (ASP.NET Core logs)
 - [ ] Kong Prometheus metrics exportadas
@@ -3643,7 +3643,7 @@ Grafana: 11.1.0 (pinado — versões 12+ têm breaking changes no provisioning)
 
 ---
 
-### Fase 6: Deploy & Kubernetes (Semana 5)
+### Phase 6: Deploy & Kubernetes (Week 5)
 
 - [ ] Docker images otimizadas (Consolidado, Lançamentos, Kong)
 - [ ] Manifests Kubernetes (Deployments, Services, ConfigMaps)
@@ -3662,58 +3662,58 @@ Grafana: 11.1.0 (pinado — versões 12+ têm breaking changes no provisioning)
 
 ---
 
-## Resumo Executivo: Vertical Slicing + CQRS para 50 req/s
+## Executive Summary: Vertical Slicing + CQRS for 50 req/s
 
-### Por que Vertical Slicing + CQRS é a decisão certa?
+### Why is Vertical Slicing + CQRS the right decision?
 
-Para um sistema que precisa:
-- **Lidar com 50 req/s** (21 bilhões de requisições em 10 anos)
-- **Crescer de 50 → 176 req/s** sem redesign
-- **Ser mantido por 10 anos** sem refatorações massivas
-- **Adicionar features** facilmente (filtros, relatórios, etc)
+For a system that needs to:
+- **Handle 50 req/s** (21 billion requests in 10 years)
+- **Grow from 50 → 176 req/s** without redesign
+- **Be maintained for 10 years** without massive refactoring
+- **Add features** easily (filters, reports, etc)
 
-**Vertical Slicing resolve estes problemas:**
+**Vertical Slicing solves these problems:**
 
 ```
-PROBLEMA            CAMADAS TRADICIONAIS         VERTICAL SLICING + CQRS
+PROBLEM             TRADITIONAL LAYERS           VERTICAL SLICING + CQRS
 ─────────────────────────────────────────────────────────────────────────
-Localizar código    5+ pastas espalhadas         1 pasta = 1 feature
-Escala              Services gigante (100+ classes)  Pastas pequenas & focadas
-Mudar feature       Toca 3+ camadas              Mudança isolada
-Novo dev            "Onde é o código X?"        "Procure em /Features/X"
-Testes              Desacoplados de código      Colocados com o código
-Reuso               Handlers reutilizados ❌    Cada slice é completo ✅
+Find code           5+ scattered folders         1 folder = 1 feature
+Scale               Giant Services (100+ classes) Small & focused folders
+Change feature      Touch 3+ layers              Isolated change
+New dev             "Where is code X?"          "Look in /Features/X"
+Tests               Decoupled from code         Colocated with code
+Reuse               Handlers reused ❌          Each slice complete ✅
 ```
 
-### Numeração Comprovada para 50 req/s
+### Proven Numbers for 50 req/s
 
 ```
 ╔═══════════════════════════════════════════════════════╗
-║         IMPACTO ARQUITETURAL EM NÚMEROS              ║
+║      ARCHITECTURAL IMPACT IN NUMBERS                 ║
 ╠═══════════════════════════════════════════════════════╣
 ║ 50 req/s (Consolidado - Read heavy)                  ║
-│   └─ Com cache Redis: 95% hit rate                   ║
-│      └─ Reduz BD: 50 → 2,5 req/s (-95%)             ║
-│      └─ CPU BD: 70% → 15% (-75%)                    ║
-│      └─ Latência P99: 50ms → 5ms (-90%)             ║
+│   └─ With Redis cache: 95% hit rate                   ║
+│      └─ Reduce DB: 50 → 2.5 req/s (-95%)            ║
+│      └─ DB CPU: 70% → 15% (-75%)                    ║
+│      └─ P99 Latency: 50ms → 5ms (-90%)              ║
 │                                                       ║
-║ Vertical Slicing permite:                            ║
-│   ✅ 0,2 req/s escrita (200 lançamentos/dia)         ║
-│   ✅ 99,6% requisições de leitura                    ║
-│   ✅ CQRS: Modelos separados (ótimo!)               ║
-│   ✅ 2 servidores Consolidado (25 req/s cada)       ║
-│   ✅ 1 servidor Lançamentos (0,1 req/s cada)        ║
+║ Vertical Slicing enables:                            ║
+│   ✅ 0.2 req/s write (200 transactions/day)          ║
+│   ✅ 99.6% read requests                             ║
+│   ✅ CQRS: Separate models (perfect!)                ║
+│   ✅ 2 Consolidado servers (25 req/s each)           ║
+│   ✅ 1 Lancamentos server (0.1 req/s each)           ║
 │                                                       ║
-║ Crescimento 10 anos (50 → 176 req/s):               ║
-│   Y1: 2 servidores × 25 req/s = 42% CPU  ✅         ║
-│   Y5: 3 servidores × 29 req/s = 49% CPU  ✅         ║
-│  Y10: 4 servidores × 44 req/s = 75% CPU  ✅         ║
+║ 10-year growth (50 → 176 req/s):                     ║
+│   Y1: 2 servers × 25 req/s = 42% CPU  ✅            ║
+│   Y5: 3 servers × 29 req/s = 49% CPU  ✅            ║
+│  Y10: 4 servers × 44 req/s = 75% CPU  ✅            ║
 │                                                       ║
-║  = SEM REDESIGN EM 10 ANOS! 🎯                      ║
+║  = NO REDESIGN IN 10 YEARS! 🎯                       ║
 ╚═══════════════════════════════════════════════════════╝
 ```
 
-### Padrão Proven em Produção
+### Proven Pattern in Production
 
 Vertical Slicing com CQRS é adotado por:
 - **Microsoft** (ASP.NET Core templates)
@@ -3722,7 +3722,7 @@ Vertical Slicing com CQRS é adotado por:
 - **Amazon** (Two-pizza teams)
 - **Google** (Vertical product teams)
 
-### Comparação Lado a Lado
+### Side-by-Side Comparison
 
 ```
 CRITÉRIO                  CAMADAS              VERTICAL SLICING
@@ -3739,9 +3739,9 @@ Manutenção Longo Prazo   ❌ Desgostoso        ✅ Sustentável
 Suporta 50 req/s?        ⚠️  Com esforço      ✅ Nativo
 ```
 
-### Recomendação Final
+### Final Recommendation
 
-**✅ RECOMENDADO: Implementar com Vertical Slicing + CQRS + Kong**
+**✅ RECOMMENDED: Implement with Vertical Slicing + CQRS + Kong**
 
 - **API Gateway:** Kong (rate limiting, circuit breaker, logging, auth plugins)
 - **Stack:** Wolverine (CQRS + Mediator + Message Bus) + Minimal APIs + Vertical Features
@@ -3763,9 +3763,9 @@ Suporta 50 req/s?        ⚠️  Com esforço      ✅ Nativo
 
 ---
 
-## Plano de Implementação
+## Implementation Plan
 
-### Roadmap: 5 Semanas até Produção
+### Roadmap: 5 Weeks to Production
 
 **Semana 1: Setup & Infraestrutura**
 1. Setup Docker Compose com PostgreSQL, Redis, RabbitMQ, Kong
@@ -3801,7 +3801,7 @@ Suporta 50 req/s?        ⚠️  Com esforço      ✅ Nativo
 4. README com instruções de setup
 5. Deploy em dev/staging/prod
 
-### Entregáveis Esperados
+### Expected Deliverables
 
 | Semana | Entregável | Status |
 |--------|-----------|--------|
@@ -3811,7 +3811,7 @@ Suporta 50 req/s?        ⚠️  Com esforço      ✅ Nativo
 | 4 | 50 req/s validado + Resiliência | ✅ |
 | 5 | Deploy + Documentação completa | 🏁 |
 
-### Critérios de Aceitação
+### Acceptance Criteria
 
 - ✅ Lançamentos recebe/processa 0.2 req/s (200 lançamentos/dia)
 - ✅ Consolidado processa 50 req/s com 95% cache hit
@@ -3823,9 +3823,9 @@ Suporta 50 req/s?        ⚠️  Com esforço      ✅ Nativo
 
 ---
 
-## Diagrama Estrutural — Para Desenho de Arquitetura
+## Structural Diagram — For Architecture Design
 
-### Visão de Componentes e Conexões
+### Components and Connections View
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════════╗
@@ -3899,7 +3899,7 @@ Suporta 50 req/s?        ⚠️  Com esforço      ✅ Nativo
 ╚══════════════════════════════════════════════════════════════════════════════════╝
 ```
 
-### Diagrama Mermaid (para ferramentas como draw.io, Mermaid Live)
+### Mermaid Diagram (for tools like draw.io, Mermaid Live)
 
 ```mermaid
 graph TB
@@ -3955,37 +3955,37 @@ graph TB
 
 ---
 
-## Validação dos Requisitos do Desafio
+## Challenge Requirements Validation
 
-### Requisitos de Negócio
+### Business Requirements
 
-| Requisito | Atendido | Como |
+| Requirement | Met | How |
 |-----------|----------|------|
-| Controle de lançamentos (débitos e créditos) | ✅ | `POST /lancamentos/registrar` — modalidade Venda/Devolucao/Suprimento/Sangria/PagamentoFornecedor/RecebimentoDivida/Outros |
-| Saldo diário consolidado | ✅ | `GET /consolidados/saldo?data-lancamento=yyyy-MM-dd` — Redis (<5ms) |
-| Independência entre serviços | ✅ | Lançamentos não conhece Consolidado; comunicação async via RabbitMQ |
+| Entry control (debits and credits) | ✅ | `POST /entries/register` — modality Sale/Return/Supplement/Withdrawal/SupplierPayment/ReceivableCollection/Other |
+| Daily consolidated balance | ✅ | `GET /consolidated/balance?entry-date=yyyy-MM-dd` — Redis (<5ms) |
+| Service independence | ✅ | Entry doesn't know Consolidated; async communication via RabbitMQ |
 
-### Requisitos Técnicos Obrigatórios
+### Mandatory Technical Requirements
 
-| Requisito | Atendido | Como |
+| Requirement | Met | How |
 |-----------|----------|------|
-| Desenho da solução documentado | ✅ | Este documento + diagrama estrutural acima |
-| Implementação em C# | ✅ | .NET 10, ASP.NET Core Minimal APIs, C# 12 |
-| Testes automatizados | ✅ | 83 testes (48 Lancamentos + 35 Consolidado), xUnit + Moq + FluentAssertions |
-| Boas práticas (Design Patterns, SOLID, Arquitetura) | ✅ | CQRS, Vertical Slicing, Outbox, Repository, DI, async/await correto |
-| README com instruções de execução | ✅ | README.md na raiz + guias em .docs/ |
-| Hospedagem em repositório público | ✅ | GitHub público |
-| Documentação completa no repositório | ✅ | .docs/ com ARQUITETURA.md, guias de setup, CONVENCOES.md |
+| Solution design documented | ✅ | This document + structural diagram above |
+| Implementation in C# | ✅ | .NET 10, ASP.NET Core Minimal APIs, C# 12 |
+| Automated tests | ✅ | 83 tests (48 Entry + 35 Consolidated), xUnit + Moq + FluentAssertions |
+| Best practices (Design Patterns, SOLID, Architecture) | ✅ | CQRS, Vertical Slicing, Outbox, Repository, DI, correct async/await |
+| README with execution instructions | ✅ | README.md in root + guides in .docs/ |
+| Hosting in public repository | ✅ | Public GitHub |
+| Complete documentation in repository | ✅ | .docs/ with ARCHITECTURE.md, setup guides, CONVENTIONS.md |
 
-### Requisitos Não-Funcionais
+### Non-Functional Requirements
 
-| Requisito | Atendido | Como |
+| Requirement | Met | How |
 |-----------|----------|------|
-| Lançamentos independente do Consolidado | ✅ | Arquitetura event-driven: Outbox + RabbitMQ. Consolidado pode cair sem afetar Lançamentos |
-| 50 req/s no Consolidado | ✅ | Redis (<5ms por request) + Kong proxy-cache 30s + rate limiting 55 req/s com headroom; validado com `FinControl.StressTests` (NBomber) |
-| Máx. 5% de perda de requisições | ✅ | Outbox Manual (nunca perde evento) + Polly retry 3× + RabbitMQ durable queue + Redis lock atômico |
+| Entry independent from Consolidated | ✅ | Event-driven architecture: Outbox + RabbitMQ. Consolidated can fail without affecting Entry |
+| 50 req/s on Consolidated | ✅ | Redis (<5ms per request) + Kong proxy-cache 30s + rate limiting 55 req/s with headroom; validated with `FinControl.StressTests` (NBomber) |
+| Max 5% request loss | ✅ | Manual Outbox (never loses event) + Polly retry 3× + RabbitMQ durable queue + atomic Redis lock |
 
-### Análise de Atendimento dos NFRs
+### NFR Fulfillment Analysis
 
 **Resiliência (Lançamentos independente do Consolidado):**
 - Lançamentos persiste em PostgreSQL + outbox_messages atomicamente
@@ -4006,9 +4006,9 @@ graph TB
 
 ---
 
-## Cobertura de Testes
+## Test Coverage
 
-### Resultado: `dotnet test`
+### Result: `dotnet test`
 
 ```
 Passed: 83   Failed: 0   Skipped: 0
@@ -4016,7 +4016,7 @@ Passed: 83   Failed: 0   Skipped: 0
   FinControl.Consolidado.Tests  →  35 testes
 ```
 
-### Detalhamento por Classe
+### Breakdown by Class
 
 #### FinControl.Lancamentos.Tests (48 testes)
 
@@ -4034,7 +4034,7 @@ Passed: 83   Failed: 0   Skipped: 0
 | `Features/Queries/GetSaldoConsolidadoQueryHandlerTests.cs` | 15 | Saldo acumulado (`saldo:consolidado:acumulado`); saldo por data específica (cache hit); fallback para dias anteriores (até 30 dias); propagação do saldo encontrado para a data requisitada; TTL de 30 dias na propagação; limite exato de 31 chamadas no fallback; parada antecipada quando saldo encontrado; saldo zero quando nenhum dado em 30 dias; conversão centavos→decimal; saldo negativo; `UltimaAtualizacao` retornada |
 | `Features/ConsolidadoRegrasDenegocioTests.cs` | 12 | **Testes funcionais end-to-end** (Command + Query com `CacheEmMemoria`): zero sem lançamentos (acumulado e por data); crédito aumenta saldo; múltiplos créditos acumulam; débito reduz saldo; débitos > créditos = saldo negativo; saldo acumulado reflete todos os lançamentos; consultas independentes (acumulado vs. diário); consulta por data específica; fallback para dia anterior sem lançamentos; lançamento retroativo; precisão monetária centavos→reais |
 
-### O Que Está Coberto
+### What is Covered
 
 - **Lógica de domínio**: classificação Credito/Debito, formatação de valor, identidade por Id
 - **Regras de validação**: 100% das regras de negócio do `RegistrarLancamentoCommandValidator` têm pelo menos 1 teste
@@ -4044,7 +4044,7 @@ Passed: 83   Failed: 0   Skipped: 0
 - **Fluxo principal de leitura**: `GetSaldoConsolidadoQueryHandler` — resolução de chave + leitura do Redis
 - **Acumulação de saldo**: `AtualizarSaldoConsolidaoCommandHandler` — cálculo incremental com lock distribuído
 
-### Lacunas de Cobertura
+### Coverage Gaps
 
 | Componente | Situação | Risco |
 |-----------|----------|-------|
@@ -4054,11 +4054,11 @@ Passed: 83   Failed: 0   Skipped: 0
 | `LancamentoRegistradoConsumer` | Sem testes | Consumer RabbitMQ do Worker — processamento de mensagem, chamada ao handler, ack/nack não verificados |
 | Detecção de duplicata (idempotência) | Sem testes | `VerificarIdempotenciaAsync` existe no handler mas nenhum teste envia o mesmo `IdempotencyKey` duas vezes para verificar o 409 |
 
-> **Conclusão:** Os 83 testes cobrem toda a lógica de negócio e regras de domínio. As lacunas estão concentradas em componentes de infraestrutura (`OutboxRelayService`, `RabbitMqPublisher`) e integração (`SubscriptionKeyMiddleware`, `Consumer`) — candidatos naturais para testes de integração com Testcontainers em uma próxima iteração.
+> **Conclusion:** The 83 tests cover all business logic and domain rules. Gaps are concentrated in infrastructure components (`OutboxRelayService`, `RabbitMqPublisher`) and integration (`SubscriptionKeyMiddleware`, `Consumer`) — natural candidates for integration tests with Testcontainers in a future iteration.
 
 ---
 
-## Próximas Etapas
+## Next Steps
 
 1. **Criar repositório no GitHub** com este planejamento
 2. **Setup local**: Docker Compose incluindo Kong (ver docker-compose.yml nesta documentação)
@@ -4068,15 +4068,15 @@ Passed: 83   Failed: 0   Skipped: 0
 
 ---
 
-## Referências & Recursos
+## References & Resources
 
-### Framework Principal: Wolverine
+### Primary Framework: Wolverine
 - **Wolverine:** https://wolverine.io (Next-generation .NET Mediator + Message Bus)
 - **Wolverine Documentation:** https://docs.wolverine.io (Guia oficial)
 - **Wolverine GitHub:** https://github.com/JasperFx/wolverine
 - **Jeremy D. Miller (Criador):** https://twitter.com/jeremydmiller (Criador do MediatR e Wolverine)
 
-### Padrões Arquiteturais
+### Architectural Patterns
 - Martin Fowler - Microservices: https://martinfowler.com/articles/microservices.html
 - DDD - Domain-Driven Design: https://www.domainlanguage.com/ddd/
 - CQRS Pattern: https://martinfowler.com/bliki/CQRS.html
@@ -4084,39 +4084,39 @@ Passed: 83   Failed: 0   Skipped: 0
 - Outbox Pattern: https://microservices.io/patterns/data/transactional-outbox.html
 - Vertical Slicing Architecture: https://www.jimmybogard.com/vertical-slice-architecture/
 
-### Stack Técnico Primário (.NET)
+### Primary Tech Stack (.NET)
 - **ASP.NET Core 10/11:** https://learn.microsoft.com/dotnet/core
 - **Minimal APIs:** https://learn.microsoft.com/aspnet/core/fundamentals/minimal-apis
-- **PostgreSQL:** https://www.postgresql.org (Database transacional)
-- **Marten:** https://martendb.io (Document Store + Outbox Pattern para PostgreSQL)
-- **Redis:** https://redis.io (Cache distribuído)
-- **RabbitMQ:** https://www.rabbitmq.com (Message Broker nativo no Wolverine)
+- **PostgreSQL:** https://www.postgresql.org (Transactional database)
+- **Marten:** https://martendb.io (Document Store + Outbox Pattern for PostgreSQL)
+- **Redis:** https://redis.io (Distributed cache)
+- **RabbitMQ:** https://www.rabbitmq.com (Native Message Broker in Wolverine)
 
-### API Gateway & Segurança
+### API Gateway & Security
 - **Kong:** https://konghq.com (API Gateway, rate limiting, circuit breaker)
 - **Kong Ingress Controller:** https://docs.konghq.com/kubernetes-ingress-controller/
 - **ModSecurity:** https://modsecurity.org (WAF - Web Application Firewall)
-- **ModSecurity Core Rule Set:** https://coreruleset.org (OWASP Top 10 proteção)
-- **Fail2Ban:** https://www.fail2ban.org (Detecção comportamental de ataques)
+- **ModSecurity Core Rule Set:** https://coreruleset.org (OWASP Top 10 protection)
+- **Fail2Ban:** https://www.fail2ban.org (Behavioral attack detection)
 - **Hashicorp Vault:** https://www.vaultproject.io (Secrets Management)
 - **Keycloak:** https://www.keycloak.org (Identity Provider - SSO, OAuth2, OIDC)
 
-### Observabilidade & Monitoramento
-- **OpenTelemetry:** https://opentelemetry.io (Observabilidade automática - integrada no Wolverine)
+### Observability & Monitoring
+- **OpenTelemetry:** https://opentelemetry.io (Automatic observability - integrated in Wolverine)
 - **Jaeger:** https://www.jaegertracing.io (Distributed tracing)
-- **Prometheus:** https://prometheus.io (Coleta de métricas)
-- **Grafana:** https://grafana.com (Dashboard de visualização)
-- **Loki:** https://grafana.com/loki (Coleta & agregação de logs)
-- **Serilog:** https://serilog.net (Structured logging para .NET)
+- **Prometheus:** https://prometheus.io (Metrics collection)
+- **Grafana:** https://grafana.com (Visualization dashboard)
+- **Loki:** https://grafana.com/loki (Logs collection & aggregation)
+- **Serilog:** https://serilog.net (Structured logging for .NET)
 
-### Linguagem & Tooling
+### Language & Tooling
 - **C# 15:** https://learn.microsoft.com/dotnet/csharp (Modern C# features: records, pattern matching, async/await)
 - **.NET CLI:** https://learn.microsoft.com/dotnet/core/tools
 - **Visual Studio 2024 / VS Code:** https://visualstudio.microsoft.com/
-- **Git:** https://git-scm.com (Controle de versão)
-- **GitHub:** https://github.com (Repositório público)
+- **Git:** https://git-scm.com (Version control)
+- **GitHub:** https://github.com (Public repository)
 
-### Boas Práticas & Standards
+### Best Practices & Standards
 - **SOLID Principles:** https://en.wikipedia.org/wiki/SOLID
 - **Clean Code:** Robert C. Martin (Uncle Bob)
 - **Clean Architecture:** https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html
@@ -4124,13 +4124,13 @@ Passed: 83   Failed: 0   Skipped: 0
 - **OWASP API Security:** https://owasp.org/www-project-api-security/
 - **Conventional Commits:** https://www.conventionalcommits.org (Commit message format)
 
-### Referências Financeiras (Domínio)
+### Financial References (Domain)
 - **PCI-DSS:** https://www.pcisecuritystandards.org (Payment Card Security)
 - **ISO 27001:** https://www.iso.org/isoiec-27001-information-security-management.html
-- **Lei Geral de Proteção de Dados (LGPD):** https://www.gov.br/cidadania/pt-br/acesso-a-informacao/lgpd
+- **General Data Protection Law (LGPD):** https://www.gov.br/cidadania/pt-br/acesso-a-informacao/lgpd
 
 ---
 
-**Versão:** 3.1  
-**Última atualização:** Maio 2026  
-**Status:** ✅ Implementação em produção — 83 testes passando, zero falhas; stress test NBomber implementado
+**Version:** 3.1  
+**Last Updated:** May 2026  
+**Status:** ✅ Production Implementation — 83 tests passing, zero failures; NBomber stress test implemented

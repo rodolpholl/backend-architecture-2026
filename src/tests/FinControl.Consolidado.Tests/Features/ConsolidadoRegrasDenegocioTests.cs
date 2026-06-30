@@ -8,23 +8,23 @@ using Microsoft.Extensions.Caching.Distributed;
 namespace FinControl.Consolidated.Tests.Features;
 
 /// <summary>
-/// Testes funcionais das regras de negócio do módulo Consolidado.
+/// Functional tests for business rules of the Consolidated module.
 ///
-/// Requisitos do desafio verificados aqui:
-///   - Serviço do consolidado diário (saldo diário com débitos e créditos)
-///   - Relatório de saldo diário consolidado por data
-///   - Isolamento entre datas distintas
-///   - Resiliência: comerciante sem histórico recebe saldo zero (não erro)
+/// Challenge requirements verified here:
+///   - Daily consolidated service (daily balance with debits and credits)
+///   - Consolidated daily balance report by date
+///   - Isolation between different dates
+///   - Resilience: merchant without history receives zero balance (not error)
 /// </summary>
-public class ConsolidadoRegrasDenegocioTests
+public class ConsolidatedBusinessRulesTests
 {
     private static readonly JsonSerializerOptions JsonOpts =
         new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    private static readonly DateTimeOffset DataPadrao =
+    private static readonly DateTimeOffset DefaultDate =
         new(2026, 5, 23, 10, 0, 0, TimeSpan.Zero);
 
-    // ── Infraestrutura de teste ───────────────────────────────────────────────
+    // ── Test Infrastructure ───────────────────────────────────────────────
 
     private static byte[] ToBytes<T>(T value) =>
         JsonSerializer.SerializeToUtf8Bytes(value, JsonOpts);
@@ -47,10 +47,10 @@ public class ConsolidadoRegrasDenegocioTests
     }
 
     /// <summary>
-    /// Simula um cache Redis em memória real para cenários de integração entre
-    /// Command (AtualizarSaldo) e Query (GetSaldo) sem depender de Redis externo.
+    /// Simulates a real in-memory Redis cache for integration scenarios between
+    /// Command (UpdateBalance) and Query (GetBalance) without depending on external Redis.
     /// </summary>
-    private sealed class CacheEmMemoria : IDistributedCache
+    private sealed class InMemoryCache : IDistributedCache
     {
         private readonly Dictionary<string, byte[]> _store = new();
 
@@ -81,9 +81,9 @@ public class ConsolidadoRegrasDenegocioTests
     }
 
     private static (UpdateConsolidatedBalanceCommandHandler command, GetConsolidatedBalanceQueryHandler query)
-        CriarHandlers(CacheEmMemoria? cache = null)
+        CreateHandlers(InMemoryCache? cache = null)
     {
-        cache ??= new CacheEmMemoria();
+        cache ??= new InMemoryCache();
         var cacheService = new RedisCacheService(cache, NullLogger<RedisCacheService>.Instance);
 
         var commandHandler = new UpdateConsolidatedBalanceCommandHandler(
@@ -98,191 +98,191 @@ public class ConsolidadoRegrasDenegocioTests
         return (commandHandler, queryHandler);
     }
 
-    // ── RN-01: Comerciante sem lançamentos tem saldo zero ─────────────────────
+    // ── BR-01: Merchant without transactions has zero balance ─────────────────
 
     [Fact]
-    public async Task Comerciante_Sem_Lancamentos_Tem_Saldo_Acumulado_Zero()
+    public async Task Merchant_Without_Transactions_Has_Zero_Accumulated_Balance()
     {
-        var (_, query) = CriarHandlers();
+        var (_, query) = CreateHandlers();
 
-        var saldo = await query.Handle(new GetConsolidatedBalanceQuery(), CancellationToken.None);
+        var balance = await query.Handle(new GetConsolidatedBalanceQuery(), CancellationToken.None);
 
-        saldo.Balance.Should().Be(0);
-        saldo.BalanceDecimal.Should().Be(0m);
+        balance.Balance.Should().Be(0);
+        balance.BalanceDecimal.Should().Be(0m);
     }
 
     [Fact]
-    public async Task Comerciante_Sem_Lancamentos_Tem_Saldo_Por_Data_Zero()
+    public async Task Merchant_Without_Transactions_Has_Zero_Balance_By_Date()
     {
-        var (_, query) = CriarHandlers();
-        var data = DateOnly.FromDateTime(DataPadrao.UtcDateTime);
+        var (_, query) = CreateHandlers();
+        var date = DateOnly.FromDateTime(DefaultDate.UtcDateTime);
 
-        var saldo = await query.Handle(new GetConsolidatedBalanceQuery(data), CancellationToken.None);
+        var balance = await query.Handle(new GetConsolidatedBalanceQuery(date), CancellationToken.None);
 
-        saldo.Balance.Should().Be(0);
+        balance.Balance.Should().Be(0);
     }
 
-    // ── RN-02: Crédito aumenta o saldo consolidado ───────────────────────────
+    // ── BR-02: Credit increases consolidated daily balance ───────────────────
 
     [Fact]
-    public async Task Credito_Aumenta_Saldo_Consolidado_Do_Dia()
+    public async Task Credit_Increases_Daily_Consolidated_Balance()
     {
-        // R$ 150,00 = 15000 centavos
-        var (command, query) = CriarHandlers();
-        await command.Handle(new UpdateConsolidatedBalanceCommand(15000, DataPadrao));
+        // $150.00 = 15000 cents
+        var (command, query) = CreateHandlers();
+        await command.Handle(new UpdateConsolidatedBalanceCommand(15000, DefaultDate));
 
-        var data = DateOnly.FromDateTime(DataPadrao.UtcDateTime);
-        var saldo = await query.Handle(new GetConsolidatedBalanceQuery(data), CancellationToken.None);
+        var date = DateOnly.FromDateTime(DefaultDate.UtcDateTime);
+        var balance = await query.Handle(new GetConsolidatedBalanceQuery(date), CancellationToken.None);
 
-        saldo.Balance.Should().Be(15000);
-        saldo.BalanceDecimal.Should().Be(150.00m);
-    }
-
-    [Fact]
-    public async Task Multiplos_Creditos_Acumulam_No_Saldo_Do_Dia()
-    {
-        // R$ 100,00 + R$ 50,00 = R$ 150,00
-        var (command, query) = CriarHandlers();
-        await command.Handle(new UpdateConsolidatedBalanceCommand(10000, DataPadrao));
-        await command.Handle(new UpdateConsolidatedBalanceCommand(5000, DataPadrao));
-
-        var data = DateOnly.FromDateTime(DataPadrao.UtcDateTime);
-        var saldo = await query.Handle(new GetConsolidatedBalanceQuery(data), CancellationToken.None);
-
-        saldo.BalanceDecimal.Should().Be(150.00m);
-    }
-
-    // ── RN-03: Débito reduz o saldo consolidado ──────────────────────────────
-
-    [Fact]
-    public async Task Debito_Reduz_Saldo_Consolidado_Do_Dia()
-    {
-        // Crédito R$ 200,00 → Débito R$ 80,00 → Saldo R$ 120,00
-        var (command, query) = CriarHandlers();
-        await command.Handle(new UpdateConsolidatedBalanceCommand(20000, DataPadrao));
-        await command.Handle(new UpdateConsolidatedBalanceCommand(-8000, DataPadrao));
-
-        var data = DateOnly.FromDateTime(DataPadrao.UtcDateTime);
-        var saldo = await query.Handle(new GetConsolidatedBalanceQuery(data), CancellationToken.None);
-
-        saldo.BalanceDecimal.Should().Be(120.00m);
+        balance.Balance.Should().Be(15000);
+        balance.BalanceDecimal.Should().Be(150.00m);
     }
 
     [Fact]
-    public async Task Debitos_Superiores_Aos_Creditos_Resultam_Em_Saldo_Negativo()
+    public async Task Multiple_Credits_Accumulate_In_Daily_Balance()
     {
-        // Crédito R$ 50,00 → Débito R$ 80,00 → Saldo -R$ 30,00
-        var (command, query) = CriarHandlers();
-        await command.Handle(new UpdateConsolidatedBalanceCommand(5000, DataPadrao));
-        await command.Handle(new UpdateConsolidatedBalanceCommand(-8000, DataPadrao));
+        // $100.00 + $50.00 = $150.00
+        var (command, query) = CreateHandlers();
+        await command.Handle(new UpdateConsolidatedBalanceCommand(10000, DefaultDate));
+        await command.Handle(new UpdateConsolidatedBalanceCommand(5000, DefaultDate));
 
-        var data = DateOnly.FromDateTime(DataPadrao.UtcDateTime);
-        var saldo = await query.Handle(new GetConsolidatedBalanceQuery(data), CancellationToken.None);
+        var date = DateOnly.FromDateTime(DefaultDate.UtcDateTime);
+        var balance = await query.Handle(new GetConsolidatedBalanceQuery(date), CancellationToken.None);
 
-        saldo.Balance.Should().BeNegative();
-        saldo.BalanceDecimal.Should().Be(-30.00m);
+        balance.BalanceDecimal.Should().Be(150.00m);
     }
 
-    // ── RN-04: Saldo acumulado consolida todos os lançamentos ────────────────
+    // ── BR-03: Debit reduces consolidated balance ──────────────────────────
 
     [Fact]
-    public async Task Saldo_Acumulado_Reflete_Total_De_Todos_Os_Lancamentos()
+    public async Task Debit_Reduces_Daily_Consolidated_Balance()
     {
-        // Dia 1: +R$ 100,00 | Dia 2: +R$ 200,00 | Acumulado: R$ 300,00
-        var (command, query) = CriarHandlers();
-        var dia1 = new DateTimeOffset(2026, 5, 22, 10, 0, 0, TimeSpan.Zero);
-        var dia2 = new DateTimeOffset(2026, 5, 23, 10, 0, 0, TimeSpan.Zero);
+        // Credit $200.00 → Debit $80.00 → Balance $120.00
+        var (command, query) = CreateHandlers();
+        await command.Handle(new UpdateConsolidatedBalanceCommand(20000, DefaultDate));
+        await command.Handle(new UpdateConsolidatedBalanceCommand(-8000, DefaultDate));
 
-        await command.Handle(new UpdateConsolidatedBalanceCommand(10000, dia1));
-        await command.Handle(new UpdateConsolidatedBalanceCommand(20000, dia2));
+        var date = DateOnly.FromDateTime(DefaultDate.UtcDateTime);
+        var balance = await query.Handle(new GetConsolidatedBalanceQuery(date), CancellationToken.None);
 
-        var saldo = await query.Handle(new GetConsolidatedBalanceQuery(), CancellationToken.None);
-
-        saldo.BalanceDecimal.Should().Be(300.00m);
+        balance.BalanceDecimal.Should().Be(120.00m);
     }
 
     [Fact]
-    public async Task Saldo_Acumulado_E_Saldo_Diario_Sao_Consultas_Independentes()
+    public async Task Debits_Greater_Than_Credits_Result_In_Negative_Balance()
     {
-        // Acumulado captura o total corrido; consulta por data captura apenas aquele dia
-        var (command, query) = CriarHandlers();
-        var dia1 = new DateTimeOffset(2026, 5, 22, 10, 0, 0, TimeSpan.Zero);
-        var dia2 = new DateTimeOffset(2026, 5, 23, 10, 0, 0, TimeSpan.Zero);
+        // Credit $50.00 → Debit $80.00 → Balance -$30.00
+        var (command, query) = CreateHandlers();
+        await command.Handle(new UpdateConsolidatedBalanceCommand(5000, DefaultDate));
+        await command.Handle(new UpdateConsolidatedBalanceCommand(-8000, DefaultDate));
 
-        await command.Handle(new UpdateConsolidatedBalanceCommand(10000, dia1));
-        await command.Handle(new UpdateConsolidatedBalanceCommand(5000, dia2));
+        var date = DateOnly.FromDateTime(DefaultDate.UtcDateTime);
+        var balance = await query.Handle(new GetConsolidatedBalanceQuery(date), CancellationToken.None);
 
-        var saldoAcumulado = await query.Handle(new GetConsolidatedBalanceQuery(), CancellationToken.None);
-        var saldoDia2 = await query.Handle(
-            new GetConsolidatedBalanceQuery(DateOnly.FromDateTime(dia2.UtcDateTime)),
+        balance.Balance.Should().BeNegative();
+        balance.BalanceDecimal.Should().Be(-30.00m);
+    }
+
+    // ── BR-04: Accumulated balance consolidates all transactions ────────────────
+
+    [Fact]
+    public async Task Accumulated_Balance_Reflects_Total_Of_All_Transactions()
+    {
+        // Day 1: +$100.00 | Day 2: +$200.00 | Accumulated: $300.00
+        var (command, query) = CreateHandlers();
+        var day1 = new DateTimeOffset(2026, 5, 22, 10, 0, 0, TimeSpan.Zero);
+        var day2 = new DateTimeOffset(2026, 5, 23, 10, 0, 0, TimeSpan.Zero);
+
+        await command.Handle(new UpdateConsolidatedBalanceCommand(10000, day1));
+        await command.Handle(new UpdateConsolidatedBalanceCommand(20000, day2));
+
+        var balance = await query.Handle(new GetConsolidatedBalanceQuery(), CancellationToken.None);
+
+        balance.BalanceDecimal.Should().Be(300.00m);
+    }
+
+    [Fact]
+    public async Task Accumulated_Balance_And_Daily_Balance_Are_Independent_Queries()
+    {
+        // Accumulated captures the running total; date query captures only that day
+        var (command, query) = CreateHandlers();
+        var day1 = new DateTimeOffset(2026, 5, 22, 10, 0, 0, TimeSpan.Zero);
+        var day2 = new DateTimeOffset(2026, 5, 23, 10, 0, 0, TimeSpan.Zero);
+
+        await command.Handle(new UpdateConsolidatedBalanceCommand(10000, day1));
+        await command.Handle(new UpdateConsolidatedBalanceCommand(5000, day2));
+
+        var accumulatedBalance = await query.Handle(new GetConsolidatedBalanceQuery(), CancellationToken.None);
+        var day2Balance = await query.Handle(
+            new GetConsolidatedBalanceQuery(DateOnly.FromDateTime(day2.UtcDateTime)),
             CancellationToken.None);
 
-        saldoAcumulado.BalanceDecimal.Should().Be(150.00m);
-        // O saldo do dia 2 reflete o acumulado até aquele momento (100 + 50)
-        saldoDia2.BalanceDecimal.Should().Be(150.00m);
+        accumulatedBalance.BalanceDecimal.Should().Be(150.00m);
+        // Day 2 balance reflects accumulated up to that point (100 + 50)
+        day2Balance.BalanceDecimal.Should().Be(150.00m);
     }
 
-    // ── RN-05: Consulta por data específica ──────────────────────────────────
+    // ── BR-05: Query by specific date ──────────────────────────────────
 
     [Fact]
-    public async Task Consulta_Por_Data_Retorna_Saldo_Do_Dia_Solicitado()
+    public async Task Query_By_Date_Returns_Balance_Of_Requested_Day()
     {
-        var (command, query) = CriarHandlers();
-        var data = new DateTimeOffset(2026, 5, 20, 0, 0, 0, TimeSpan.Zero);
-        await command.Handle(new UpdateConsolidatedBalanceCommand(7500, data));
+        var (command, query) = CreateHandlers();
+        var date = new DateTimeOffset(2026, 5, 20, 0, 0, 0, TimeSpan.Zero);
+        await command.Handle(new UpdateConsolidatedBalanceCommand(7500, date));
 
-        var saldo = await query.Handle(
+        var balance = await query.Handle(
             new GetConsolidatedBalanceQuery(new DateOnly(2026, 5, 20)),
             CancellationToken.None);
 
-        saldo.BalanceDecimal.Should().Be(75.00m);
+        balance.BalanceDecimal.Should().Be(75.00m);
     }
 
-    // ── RN-06: Fallback para o dia anterior quando não há lançamentos ────────
+    // ── BR-06: Fallback to previous day when no transactions ────────
 
     [Fact]
-    public async Task Consulta_De_Dia_Sem_Lancamentos_Retorna_Saldo_Mais_Recente_Disponivel()
+    public async Task Query_Of_Day_Without_Transactions_Returns_Most_Recent_Available_Balance()
     {
-        // Lançamento em 22/05, consulta em 23/05 (sem lançamentos) → retorna o do dia 22
-        var (command, query) = CriarHandlers();
-        var dia22 = new DateTimeOffset(2026, 5, 22, 10, 0, 0, TimeSpan.Zero);
-        await command.Handle(new UpdateConsolidatedBalanceCommand(9000, dia22));
+        // Transaction on 5/22, query on 5/23 (no transactions) → returns 5/22 balance
+        var (command, query) = CreateHandlers();
+        var day22 = new DateTimeOffset(2026, 5, 22, 10, 0, 0, TimeSpan.Zero);
+        await command.Handle(new UpdateConsolidatedBalanceCommand(9000, day22));
 
-        var saldo = await query.Handle(
+        var balance = await query.Handle(
             new GetConsolidatedBalanceQuery(new DateOnly(2026, 5, 23)),
             CancellationToken.None);
 
-        saldo.BalanceDecimal.Should().Be(90.00m);
+        balance.BalanceDecimal.Should().Be(90.00m);
     }
 
-    // ── RN-07: Lançamento retroativo vai para a data correta ─────────────────
+    // ── BR-07: Retroactive transaction goes to correct date ─────────────────
 
     [Fact]
-    public async Task Lancamento_Retroativo_E_Consolidado_Na_Data_Informada()
+    public async Task Retroactive_Transaction_Is_Consolidated_On_Specified_Date()
     {
-        var (command, query) = CriarHandlers();
-        var dataRetroativa = new DateTimeOffset(2025, 12, 31, 23, 59, 0, TimeSpan.Zero);
+        var (command, query) = CreateHandlers();
+        var retroactiveDate = new DateTimeOffset(2025, 12, 31, 23, 59, 0, TimeSpan.Zero);
 
-        await command.Handle(new UpdateConsolidatedBalanceCommand(5000, dataRetroativa));
+        await command.Handle(new UpdateConsolidatedBalanceCommand(5000, retroactiveDate));
 
-        var saldo = await query.Handle(
+        var balance = await query.Handle(
             new GetConsolidatedBalanceQuery(new DateOnly(2025, 12, 31)),
             CancellationToken.None);
 
-        saldo.BalanceDecimal.Should().Be(50.00m);
+        balance.BalanceDecimal.Should().Be(50.00m);
     }
 
-    // ── RN-08: Precisão monetária (centavos → reais) ─────────────────────────
+    // ── BR-08: Monetary precision (cents → dollars) ─────────────────────────
 
     [Fact]
-    public async Task Valor_Em_Centavos_E_Convertido_Corretamente_Para_Reais()
+    public async Task Amount_In_Cents_Is_Converted_Correctly_To_Dollars()
     {
-        // R$ 1.234,56 = 123456 centavos
-        var (command, query) = CriarHandlers();
-        await command.Handle(new UpdateConsolidatedBalanceCommand(123456, DataPadrao));
+        // $1,234.56 = 123456 cents
+        var (command, query) = CreateHandlers();
+        await command.Handle(new UpdateConsolidatedBalanceCommand(123456, DefaultDate));
 
-        var saldo = await query.Handle(new GetConsolidatedBalanceQuery(), CancellationToken.None);
+        var balance = await query.Handle(new GetConsolidatedBalanceQuery(), CancellationToken.None);
 
-        saldo.BalanceDecimal.Should().Be(1234.56m);
+        balance.BalanceDecimal.Should().Be(1234.56m);
     }
 }

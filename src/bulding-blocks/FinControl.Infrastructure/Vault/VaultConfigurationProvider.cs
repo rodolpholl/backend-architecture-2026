@@ -9,15 +9,15 @@ using VaultSharp.V1.SecretsEngines.KeyValue.V2;
 namespace FinControl.Infrastructure.Vault;
 
 /// <summary>
-/// Provedor de configuração customizado que lê secrets do HashiCorp Vault
-/// e os injeta no pipeline de IConfiguration do .NET.
+/// Custom configuration provider that reads secrets from HashiCorp Vault
+/// and injects them into the .NET IConfiguration pipeline.
 ///
 /// ────────────────────────────────────────────────────────────────────────────
-/// ESTRATÉGIA DE INJEÇÃO DE CHAVES
+/// KEY INJECTION STRATEGY
 /// ────────────────────────────────────────────────────────────────────────────
 ///
-/// Cada secret path é lido e suas chaves são injetadas no IConfiguration
-/// usando o ÚLTIMO SEGMENTO DO PATH como namespace:
+/// Each secret path is read and its keys are injected into IConfiguration
+/// using the LAST SEGMENT OF THE PATH as namespace:
 ///
 ///   Path: "dev/postgres"  | Vault key: "connection_string"
 ///   → IConfiguration key: "postgres:connection_string"
@@ -31,17 +31,17 @@ namespace FinControl.Infrastructure.Vault;
 ///   Path: "dev/grafana"   | Vault key: "loki_url"
 ///   → IConfiguration key: "grafana:loki_url"
 ///
-/// Isso garante que secrets de paths diferentes não colidam, e que os
-/// nomes das constantes em VaultKeys reflitam exatamente a estrutura do Vault.
+/// This ensures that secrets from different paths don't collide, and that the
+/// names of constants in VaultKeys exactly reflect the structure of the Vault.
 ///
 /// ────────────────────────────────────────────────────────────────────────────
-/// Se VaultOptions.ConfigurationPrefix estiver preenchido, ele é adicionado
-/// como prefixo adicional: "{prefix}:{namespace}:{key}"
+/// If VaultOptions.ConfigurationPrefix is populated, it is added
+/// as an additional prefix: "{prefix}:{namespace}:{key}"
 /// ────────────────────────────────────────────────────────────────────────────
 ///
-/// Autenticação suportada:
-///   - AppRole  (produção)  — RoleId + SecretId
-///   - Token    (dev local) — token raiz (ex: "myroot")
+/// Supported authentication:
+///   - AppRole  (production)  — RoleId + SecretId
+///   - Token    (local dev)   — root token (ex: "myroot")
 /// </summary>
 internal sealed class VaultConfigurationProvider(VaultOptions options) : ConfigurationProvider
 {
@@ -56,9 +56,9 @@ internal sealed class VaultConfigurationProvider(VaultOptions options) : Configu
         }
         catch (Exception ex) when (!options.Required)
         {
-            // Modo não-obrigatório (dev local): loga e continua sem os secrets do Vault
+            // Optional mode (local dev): logs and continues without Vault secrets
             Console.Error.WriteLine(
-                $"[Vault] Falha ao carregar secrets (Required=false): {ex.Message}");
+                $"[Vault] Failed to load secrets (Required=false): {ex.Message}");
         }
     }
 
@@ -71,7 +71,7 @@ internal sealed class VaultConfigurationProvider(VaultOptions options) : Configu
                     path: path,
                     mountPoint: options.MountPoint);
 
-            // O último segmento do path vira o namespace das chaves.
+            // The last segment of the path becomes the namespace for the keys.
             // Ex: "dev/postgres" → namespace = "postgres"
             var pathNamespace = path.Contains('/')
                 ? path[(path.LastIndexOf('/') + 1)..]
@@ -79,10 +79,10 @@ internal sealed class VaultConfigurationProvider(VaultOptions options) : Configu
 
             foreach (var kvp in secret.Data.Data)
             {
-                // Normaliza "__" → ":" para hierarquia no IConfiguration
+                // Normalizes "__" → ":" for hierarchy in IConfiguration
                 var normalizedKey = NormalizeKey(kvp.Key);
 
-                // Monta a chave final: [{prefix}:]{namespace}:{key}
+                // Builds the final key: [{prefix}:]{namespace}:{key}
                 var key = string.IsNullOrEmpty(options.ConfigurationPrefix)
                     ? $"{pathNamespace}:{normalizedKey}"
                     : $"{options.ConfigurationPrefix}:{pathNamespace}:{normalizedKey}";
@@ -99,7 +99,7 @@ internal sealed class VaultConfigurationProvider(VaultOptions options) : Configu
             "APPROLE" => BuildAppRoleAuth(),
             "TOKEN"   => BuildTokenAuth(),
             _ => throw new InvalidOperationException(
-                $"Vault AuthMethod '{options.AuthMethod}' não suportado. Use 'AppRole' ou 'Token'.")
+                $"Vault AuthMethod '{options.AuthMethod}' not supported. Use 'AppRole' or 'Token'.")
         };
 
         var settings = new VaultClientSettings(options.Address, authMethod)
@@ -114,10 +114,10 @@ internal sealed class VaultConfigurationProvider(VaultOptions options) : Configu
     {
         if (string.IsNullOrWhiteSpace(options.RoleId))
             throw new InvalidOperationException(
-                "Vault:RoleId é obrigatório para autenticação AppRole.");
+                "Vault:RoleId is required for AppRole authentication.");
         if (string.IsNullOrWhiteSpace(options.SecretId))
             throw new InvalidOperationException(
-                "Vault:SecretId é obrigatório para autenticação AppRole.");
+                "Vault:SecretId is required for AppRole authentication.");
 
         return new AppRoleAuthMethodInfo(options.RoleId, options.SecretId);
     }
@@ -126,7 +126,7 @@ internal sealed class VaultConfigurationProvider(VaultOptions options) : Configu
     {
         if (string.IsNullOrWhiteSpace(options.Token))
             throw new InvalidOperationException(
-                "Vault:Token é obrigatório para autenticação Token.");
+                "Vault:Token is required for Token authentication.");
 
         return new TokenAuthMethodInfo(options.Token);
     }

@@ -45,7 +45,7 @@ public sealed class TransactionRegisteredConsumer(
             catch (Exception ex)
             {
                 logger.LogError(ex,
-                    "Conexão RabbitMQ perdida. Reconectando em {DelaySeconds}s...",
+                    "RabbitMQ connection lost. Reconnecting in {DelaySeconds}s...",
                     delay.TotalSeconds);
                 await Task.Delay(delay, stoppingToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
                 delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 60));

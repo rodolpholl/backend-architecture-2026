@@ -8,75 +8,75 @@ public sealed class GetConsolidatedBalanceQueryHandler(
     RedisCacheService cache,
     ILogger<GetConsolidatedBalanceQueryHandler> logger)
 {
-    private const string CACHE_KEY_ACUMULADO = "saldo:consolidado:acumulado";
+    private const string CACHE_KEY_ACCUMULATED = "balance:consolidated:accumulated";
     private const int MAX_LOOKBACK_DAYS = 30;
 
-    private static string CacheKey(DateOnly data) => $"saldo:consolidado:{data:yyyy-MM-dd}";
+    private static string CacheKey(DateOnly data) => $"balance:consolidated:{data:yyyy-MM-dd}";
 
     public async Task<GetConsolidatedBalanceResponse> Handle(
         GetConsolidatedBalanceQuery request,
         CancellationToken cancellationToken)
     {
         if (!request.TransactionDate.HasValue)
-            return await GetAcumuladoAsync(cancellationToken);
+            return await GetAccumulatedAsync(cancellationToken);
 
-        return await GetPorDataAsync(request.TransactionDate.Value, cancellationToken);
+        return await GetByDateAsync(request.TransactionDate.Value, cancellationToken);
     }
 
-    private async Task<GetConsolidatedBalanceResponse> GetAcumuladoAsync(CancellationToken ct)
+    private async Task<GetConsolidatedBalanceResponse> GetAccumulatedAsync(CancellationToken ct)
     {
-        var saldo = await cache.GetAsync<ConsolidatedBalance>(CACHE_KEY_ACUMULADO, ct);
+        var saldo = await cache.GetAsync<ConsolidatedBalance>(CACHE_KEY_ACCUMULATED, ct);
         return new GetConsolidatedBalanceResponse(
             Balance: saldo?.Balance ?? 0,
             LastUpdated: saldo?.LastUpdated ?? DateTimeOffset.UtcNow);
     }
 
-    private async Task<GetConsolidatedBalanceResponse> GetPorDataAsync(
-        DateOnly dataRequisitada,
+    private async Task<GetConsolidatedBalanceResponse> GetByDateAsync(
+        DateOnly requestedDate,
         CancellationToken ct)
     {
-        var keyRequisitada = CacheKey(dataRequisitada);
-        var saldo = await cache.GetAsync<ConsolidatedBalance>(keyRequisitada, ct);
+        var requestedKey = CacheKey(requestedDate);
+        var balance = await cache.GetAsync<ConsolidatedBalance>(requestedKey, ct);
 
-        if (saldo is null)
-            saldo = await BuscarSaldoAnteriorAsync(dataRequisitada, keyRequisitada, ct);
+        if (balance is null)
+            balance = await FindPreviousBalanceAsync(requestedDate, requestedKey, ct);
 
         if (logger.IsEnabled(LogLevel.Information))
             logger.LogInformation(
-                "Saldo consolidado retornado | Saldo={Saldo} LastUpdated={LastUpdated} CacheKey={CacheKey}",
-                saldo.Balance,
-                saldo.LastUpdated,
-                keyRequisitada);
+                "Consolidated balance returned | Balance={Balance} LastUpdated={LastUpdated} CacheKey={CacheKey}",
+                balance.Balance,
+                balance.LastUpdated,
+                requestedKey);
 
-        return new GetConsolidatedBalanceResponse(saldo.Balance, saldo.LastUpdated);
+        return new GetConsolidatedBalanceResponse(balance.Balance, balance.LastUpdated);
     }
 
-    private async Task<ConsolidatedBalance> BuscarSaldoAnteriorAsync(
-        DateOnly dataRequisitada,
-        string keyRequisitada,
+    private async Task<ConsolidatedBalance> FindPreviousBalanceAsync(
+        DateOnly requestedDate,
+        string requestedKey,
         CancellationToken ct)
     {
         for (int i = 1; i <= MAX_LOOKBACK_DAYS; i++)
         {
-            var dataAnterior = dataRequisitada.AddDays(-i);
-            var saldo = await cache.GetAsync<ConsolidatedBalance>(CacheKey(dataAnterior), ct);
+            var previousDate = requestedDate.AddDays(-i);
+            var balance = await cache.GetAsync<ConsolidatedBalance>(CacheKey(previousDate), ct);
 
-            if (saldo is not null)
+            if (balance is not null)
             {
                 if (logger.IsEnabled(LogLevel.Information))
                     logger.LogInformation(
-                        "Saldo encontrado em data anterior | DataRequisitada={DataRequisitada} DataEncontrada={DataEncontrada} Tentativa={Tentativa}",
-                        dataRequisitada, dataAnterior, i);
+                        "Balance found on previous date | RequestedDate={RequestedDate} FoundDate={FoundDate} Attempt={Attempt}",
+                        requestedDate, previousDate, i);
 
-                // Propaga para a data requisitada para acelerar consultas futuras ao mesmo dia
-                await cache.SetAsync(keyRequisitada, saldo, TimeSpan.FromDays(30), ct);
-                return saldo;
+                // Propagate to requested date to speed up future queries for the same day
+                await cache.SetAsync(requestedKey, balance, TimeSpan.FromDays(30), ct);
+                return balance;
             }
         }
 
         logger.LogWarning(
-            "Nenhum saldo encontrado nos últimos {MaxDias} dias anteriores a {Data}. Retornando saldo zero.",
-            MAX_LOOKBACK_DAYS, dataRequisitada);
+            "No balance found in the last {MaxDays} days before {Date}. Returning zero balance.",
+            MAX_LOOKBACK_DAYS, requestedDate);
 
         return new ConsolidatedBalance(0, DateTimeOffset.UtcNow);
     }

@@ -23,44 +23,44 @@ public class RegisterTransactionCommandHandlerTests
     private static RegisterTransactionCommandHandler CreateHandler(TransactionsDbContext db) =>
         new(db, NullLogger<RegisterTransactionCommandHandler>.Instance);
 
-    // ── Persistência ────────────────────────────────────────────────────────
+    // ── Persistence ────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Deve_Salvar_Lancamento_No_Banco()
+    public async Task Should_Save_Transaction_In_Database()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        await handler.Handle(TransactionCommandFaker.ValidVenda(1500));
+        await handler.Handle(TransactionCommandFaker.ValidSale(1500));
 
         db.Transactions.Should().HaveCount(1);
     }
 
     [Fact]
-    public async Task Deve_Retornar_NavigationId_Valido()
+    public async Task Should_Return_Valid_NavigationId()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        var response = await handler.Handle(TransactionCommandFaker.ValidVenda());
+        var response = await handler.Handle(TransactionCommandFaker.ValidSale());
 
         response.NavigationId.Should().NotBe(Guid.Empty);
     }
 
     [Fact]
-    public async Task Deve_Retornar_CriadoEm_Recente()
+    public async Task Should_Return_Recent_CreatedAt()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
-        var antes = DateTimeOffset.UtcNow;
+        var before = DateTimeOffset.UtcNow;
 
-        var response = await handler.Handle(TransactionCommandFaker.ValidVenda());
+        var response = await handler.Handle(TransactionCommandFaker.ValidSale());
 
-        response.CreatedAt.Should().BeOnOrAfter(antes);
+        response.CreatedAt.Should().BeOnOrAfter(before);
     }
 
     [Fact]
-    public async Task Deve_Persistir_Dados_Do_Comando_No_Lancamento()
+    public async Task Should_Persist_Command_Data_In_Transaction()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
@@ -68,120 +68,120 @@ public class RegisterTransactionCommandHandlerTests
 
         await handler.Handle(command);
 
-        var salvo = db.Transactions.Single();
-        salvo.Amount.Should().Be(command.Amount);
-        salvo.Category.Should().Be(command.Category);
-        salvo.Description.Should().Be(command.Description);
-        salvo.CreatedBy.Should().Be(command.UserId);
-        salvo.CreatedByName.Should().Be(command.UserName);
-        salvo.CreatedByEmail.Should().Be(command.UserEmail);
+        var saved = db.Transactions.Single();
+        saved.Amount.Should().Be(command.Amount);
+        saved.Category.Should().Be(command.Category);
+        saved.Description.Should().Be(command.Description);
+        saved.CreatedBy.Should().Be(command.UserId);
+        saved.CreatedByName.Should().Be(command.UserName);
+        saved.CreatedByEmail.Should().Be(command.UserEmail);
     }
 
     [Fact]
-    public async Task Deve_Usar_TransactionDate_Atual_Quando_Default()
+    public async Task Should_Use_Current_TransactionDate_When_Default()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
-        var command = TransactionCommandFaker.ValidVenda() with { TransactionDate = default };
-        var antes = DateTimeOffset.UtcNow;
+        var command = TransactionCommandFaker.ValidSale() with { TransactionDate = default };
+        var before = DateTimeOffset.UtcNow;
 
         await handler.Handle(command);
 
-        var salvo = db.Transactions.Single();
-        salvo.TransactionDate.Should().BeOnOrAfter(antes);
+        var saved = db.Transactions.Single();
+        saved.TransactionDate.Should().BeOnOrAfter(before);
     }
 
     [Fact]
-    public async Task Deve_Preservar_TransactionDate_Informada()
+    public async Task Should_Preserve_Provided_TransactionDate()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
-        var dataEsperada = DateTimeOffset.UtcNow.AddDays(-5);
-        var command = TransactionCommandFaker.ValidVenda() with { TransactionDate = dataEsperada };
+        var expectedDate = DateTimeOffset.UtcNow.AddDays(-5);
+        var command = TransactionCommandFaker.ValidSale() with { TransactionDate = expectedDate };
 
         await handler.Handle(command);
 
-        var salvo = db.Transactions.Single();
-        salvo.TransactionDate.Should().BeCloseTo(dataEsperada, TimeSpan.FromSeconds(1));
+        var saved = db.Transactions.Single();
+        saved.TransactionDate.Should().BeCloseTo(expectedDate, TimeSpan.FromSeconds(1));
     }
 
     // ── Outbox ──────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Deve_Enfileirar_OutboxMessage_Na_Mesma_Operacao()
+    public async Task Should_Queue_OutboxMessage_In_Same_Operation()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        await handler.Handle(TransactionCommandFaker.ValidVenda(1000));
+        await handler.Handle(TransactionCommandFaker.ValidSale(1000));
 
         db.OutboxMessages.Should().HaveCount(1);
     }
 
     [Fact]
-    public async Task Deve_Enfileirar_OutboxMessage_Com_Exchange_E_RoutingKey_Corretos()
+    public async Task Should_Queue_OutboxMessage_With_Correct_Exchange_And_RoutingKey()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        await handler.Handle(TransactionCommandFaker.ValidVenda(1000));
+        await handler.Handle(TransactionCommandFaker.ValidSale(1000));
 
         var msg = db.OutboxMessages.Single();
-        msg.Exchange.Should().Be("lancamentos.events");
-        msg.RoutingKey.Should().Be("lancamento.criado");
+        msg.Exchange.Should().Be("transactions.events");
+        msg.RoutingKey.Should().Be("transaction.created");
         msg.MessageType.Should().Be(nameof(SharedKernelEvents.TransactionRegisteredMessage));
     }
 
     [Fact]
-    public async Task Deve_Enfileirar_Payload_Com_Valor_Correto()
+    public async Task Should_Queue_Payload_With_Correct_Amount()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
-        var command = TransactionCommandFaker.ValidVenda(3333);
+        var command = TransactionCommandFaker.ValidSale(3333);
 
         await handler.Handle(command);
 
         var payload = db.OutboxMessages.Single().Payload;
-        var evento = JsonSerializer.Deserialize<SharedKernelEvents.TransactionRegisteredMessage>(payload, JsonOptions)!;
-        evento.Amount.Should().Be(3333);
+        var eventData = JsonSerializer.Deserialize<SharedKernelEvents.TransactionRegisteredMessage>(payload, JsonOptions)!;
+        eventData.Amount.Should().Be(3333);
     }
 
     [Fact]
-    public async Task Deve_Enfileirar_Payload_Com_CorrelationId_Do_Comando()
+    public async Task Should_Queue_Payload_With_Command_CorrelationId()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
-        var command = TransactionCommandFaker.ValidVenda();
+        var command = TransactionCommandFaker.ValidSale();
 
         await handler.Handle(command);
 
         var payload = db.OutboxMessages.Single().Payload;
-        var evento = JsonSerializer.Deserialize<SharedKernelEvents.TransactionRegisteredMessage>(payload, JsonOptions)!;
-        evento.CorrelationId.Should().Be(command.CorrelationId);
+        var eventData = JsonSerializer.Deserialize<SharedKernelEvents.TransactionRegisteredMessage>(payload, JsonOptions)!;
+        eventData.CorrelationId.Should().Be(command.CorrelationId);
     }
 
     [Fact]
-    public async Task OutboxMessage_Deve_Iniciar_Nao_Entregue()
+    public async Task OutboxMessage_Should_Start_Not_Delivered()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        await handler.Handle(TransactionCommandFaker.ValidVenda());
+        await handler.Handle(TransactionCommandFaker.ValidSale());
 
         db.OutboxMessages.Single().DeliveredAt.Should().BeNull();
     }
 
-    // ── Múltiplos lançamentos ────────────────────────────────────────────────
+    // ── Multiple Transactions ────────────────────────────────────────────────
 
     [Fact]
-    public async Task Deve_Persistir_Multiplos_Lancamentos_Independentes()
+    public async Task Should_Persist_Multiple_Independent_Transactions()
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        await handler.Handle(TransactionCommandFaker.ValidVenda(1000));
-        await handler.Handle(TransactionCommandFaker.ValidDebito(TransactionCategory.Return, -500));
-        await handler.Handle(TransactionCommandFaker.ValidVenda(2500));
+        await handler.Handle(TransactionCommandFaker.ValidSale(1000));
+        await handler.Handle(TransactionCommandFaker.ValidDebit(TransactionCategory.Return, -500));
+        await handler.Handle(TransactionCommandFaker.ValidSale(2500));
 
         db.Transactions.Should().HaveCount(3);
         db.OutboxMessages.Should().HaveCount(3);

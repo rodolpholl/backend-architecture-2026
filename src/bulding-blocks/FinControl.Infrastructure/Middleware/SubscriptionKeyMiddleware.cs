@@ -7,16 +7,16 @@ using Microsoft.Extensions.Logging;
 namespace FinControl.Infrastructure.Middleware;
 
 /// <summary>
-/// Valida o header X-Subscription-Key contra a chave armazenada no Vault.
+/// Validates the X-Subscription-Key header against the key stored in Vault.
 ///
-/// Funciona como segunda camada de defesa: Kong valida na borda da rede;
-/// este middleware valida na API, cobrindo requisições que cheguem por fora do gateway.
+/// Works as a second layer of defense: Kong validates at the network edge;
+/// this middleware validates in the API, covering requests that come from outside the gateway.
 ///
-/// Comportamento:
-///   - Rotas /health são sempre liberadas (liveness/readiness não exigem key).
-///   - Se a chave não estiver configurada (Vault indisponível em dev), a validação é ignorada.
-///   - Comparação é case-sensitive e em tempo constante para evitar timing attacks.
-///   - Retorna 401 ProblemDetails quando a key está ausente ou incorreta.
+/// Behavior:
+///   - /health routes are always allowed (liveness/readiness don't require a key).
+///   - If the key is not configured (Vault unavailable in dev), validation is skipped.
+///   - Comparison is case-sensitive and constant-time to prevent timing attacks.
+///   - Returns 401 ProblemDetails when the key is absent or incorrect.
 /// </summary>
 public sealed class SubscriptionKeyMiddleware(RequestDelegate next, string configurationKey)
 {
@@ -38,7 +38,7 @@ public sealed class SubscriptionKeyMiddleware(RequestDelegate next, string confi
 
         if (string.IsNullOrEmpty(expectedKey))
         {
-            // Vault indisponível (ex: dev sem docker) — validação desativada
+            // Vault unavailable (ex: dev without docker) — validation disabled
             await next(context);
             return;
         }
@@ -50,7 +50,7 @@ public sealed class SubscriptionKeyMiddleware(RequestDelegate next, string confi
             var correlationId = context.Items["X-Correlation-Id"]?.ToString();
 
             logger.LogWarning(
-                "Subscription key inválida ou ausente. CorrelationId={CorrelationId} Path={Path} IP={IP}",
+                "Subscription key invalid or missing. CorrelationId={CorrelationId} Path={Path} IP={IP}",
                 correlationId,
                 context.Request.Path,
                 context.Connection.RemoteIpAddress);
@@ -61,8 +61,8 @@ public sealed class SubscriptionKeyMiddleware(RequestDelegate next, string confi
             await context.Response.WriteAsJsonAsync(new ProblemDetails
             {
                 Status = StatusCodes.Status401Unauthorized,
-                Title = "Subscription key inválida",
-                Detail = "O header X-Subscription-Key está ausente ou é inválido.",
+                Title = "Invalid subscription key",
+                Detail = "The X-Subscription-Key header is missing or invalid.",
                 Extensions = { ["correlationId"] = correlationId }
             });
             return;
@@ -71,7 +71,7 @@ public sealed class SubscriptionKeyMiddleware(RequestDelegate next, string confi
         await next(context);
     }
 
-    // CryptographicOperations.FixedTimeEquals evita timing attack por comparação de strings
+    // CryptographicOperations.FixedTimeEquals avoids timing attack from string comparison
     private static bool ValidKey(string? provided, string expected)
     {
         if (string.IsNullOrEmpty(provided))
@@ -88,11 +88,11 @@ public sealed class SubscriptionKeyMiddleware(RequestDelegate next, string confi
 public static class SubscriptionKeyMiddlewareExtensions
 {
     /// <summary>
-    /// Adiciona validação de subscription key ao pipeline HTTP.
+    /// Adds subscription key validation to the HTTP pipeline.
     /// </summary>
     /// <param name="configurationKey">
-    /// Chave do IConfiguration que contém a subscription key esperada.
-    /// Use as constantes de <see cref="FinControl.Infrastructure.Vault.VaultKeys"/>.
+    /// IConfiguration key that contains the expected subscription key.
+    /// Use the constants from <see cref="FinControl.Infrastructure.Vault.VaultKeys"/>.
     /// </param>
     public static IApplicationBuilder UseSubscriptionKeyValidation(
         this IApplicationBuilder app,

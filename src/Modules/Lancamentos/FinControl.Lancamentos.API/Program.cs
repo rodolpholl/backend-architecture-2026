@@ -9,15 +9,15 @@ using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ==================== CONFIGURAÇÃO DE SECRETS (VAULT) ====================
-// ⚠️ DEVE SER PRIMEIRO: inicia o pipeline de leitura de secrets do Vault
+// ==================== SECRETS CONFIGURATION (VAULT) ====================
+// ⚠️ MUST BE FIRST: starts the Vault secrets reading pipeline
 try
 {
     builder.AddFinControlVault();
 }
 catch (Exception ex) when (builder.Environment.IsDevelopment())
 {
-    Console.WriteLine($"⚠️  Vault não disponível em desenvolvimento: {ex.Message}");
+    Console.WriteLine($"⚠️  Vault not available in development: {ex.Message}");
 }
 
 // ==================== LOGGING ====================
@@ -27,17 +27,17 @@ try
 }
 catch (Exception ex) when (builder.Environment.IsDevelopment())
 {
-    Console.WriteLine($"⚠️  Serilog não fully configurado em desenvolvimento: {ex.Message}");
+    Console.WriteLine($"⚠️  Serilog not fully configured in development: {ex.Message}");
 }
 
-// ==================== OBSERVABILIDADE ====================
+// ==================== OBSERVABILITY ====================
 try
 {
     builder.AddFinControlObservability("fincontrol-lancamentos");
 }
 catch (Exception ex) when (builder.Environment.IsDevelopment())
 {
-    Console.WriteLine($"⚠️  Observabilidade não disponível em desenvolvimento: {ex.Message}");
+    Console.WriteLine($"⚠️  Observability not available in development: {ex.Message}");
 }
 
 // ==================== DATABASE ====================
@@ -48,7 +48,7 @@ builder.Services.AddDbContext<TransactionsDbContext>(opts =>
    
     if (string.IsNullOrEmpty(connectionString))
         throw new InvalidOperationException(
-            $"Secret '{VaultKeys.PostgresConnection}' não encontrado no Vault (dev/postgres → connection_string).");
+            $"Secret '{VaultKeys.PostgresConnection}' not found in Vault (dev/postgres → connection_string).");
     
 
     opts.UseNpgsql(connectionString);
@@ -64,17 +64,17 @@ try
 }
 catch (Exception ex) when (builder.Environment.IsDevelopment())
 {
-    Console.WriteLine($"⚠️  Health checks incompletos em desenvolvimento: {ex.Message}");
+    Console.WriteLine($"⚠️  Health checks incomplete in development: {ex.Message}");
 }
 
-// ==================== AUTENTICAÇÃO JWT (KEYCLOAK) ====================
+// ==================== JWT AUTHENTICATION (KEYCLOAK) ====================
 try
 {
     builder.AddFinControlKeycloakAuth();
 }
 catch (Exception ex) when (builder.Environment.IsDevelopment())
 {
-    Console.WriteLine($"⚠️  Keycloak não configurado em desenvolvimento: {ex.Message}");
+    Console.WriteLine($"⚠️  Keycloak not configured in development: {ex.Message}");
 }
 
 // ==================== API / OPENAPI ====================
@@ -167,13 +167,13 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// Endpoints de todos os módulos (descobertos automaticamente pelo Wolverine)
+// Endpoints from all modules (auto-discovered by Wolverine)
 app.MapAllModules();
 
 // Prometheus /metrics
 app.MapFinControlMetricsEndpoint();
 
 // ==================== RUN ====================
-Console.WriteLine($"\n🚀 Aplicação iniciando em modo: {(app.Environment.IsDevelopment() ? "DESENVOLVIMENTO" : "PRODUÇÃO")}\n");
+Console.WriteLine($"\n🚀 Application starting in mode: {(app.Environment.IsDevelopment() ? "DEVELOPMENT" : "PRODUCTION")}\n");
 app.Run();
 

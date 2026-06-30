@@ -7,11 +7,11 @@ using Wolverine;
 namespace FinControl.Infrastructure.Wolverine;
 
 /// <summary>
-/// Middleware Wolverine de validação automática via FluentValidation.
+/// Wolverine middleware for automatic validation via FluentValidation.
 ///
-/// Usa Envelope (tipo nativo Wolverine) e reflexão para resolver IValidator&lt;T&gt;
-/// sem precisar de parâmetro genérico T no método Before.
-/// Parâmetros genéricos T em middleware causam UnResolvableVariableException no JasperFx code gen.
+/// Uses Envelope (Wolverine native type) and reflection to resolve IValidator&lt;T&gt;
+/// without needing generic parameter T in the Before method.
+/// Generic parameters T in middleware cause UnResolvableVariableException in JasperFx code gen.
 /// </summary>
 public sealed class FluentValidationMiddleware(IServiceProvider services)
 {
@@ -34,14 +34,14 @@ public sealed class FluentValidationMiddleware(IServiceProvider services)
         if (result.IsValid)
             return;
 
-        var erros = result.Errors
+        var errors = result.Errors
             .Select(f => $"{f.PropertyName}: {f.ErrorMessage}")
             .ToArray();
 
         logger.LogWarning(
-            "Validação falhou para {MessageType}. Erros: [{Errors}]",
+            "Validation failed for {MessageType}. Errors: [{Errors}]",
             messageType.Name,
-            string.Join(" | ", erros));
+            string.Join(" | ", errors));
 
         throw new ValidationException(result.Errors);
     }

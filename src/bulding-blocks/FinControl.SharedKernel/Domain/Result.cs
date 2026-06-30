@@ -9,9 +9,9 @@ public class Result
     protected Result(bool isSuccess, DomainError error)
     {
         if (isSuccess  && error != DomainError.None)
-            throw new InvalidOperationException("Resultado de sucesso não pode ter erro.");
+            throw new InvalidOperationException("A successful result cannot have an error.");
         if (!isSuccess && error == DomainError.None)
-            throw new InvalidOperationException("Resultado de falha deve ter um erro.");
+            throw new InvalidOperationException("A failed result must have an error.");
 
         IsSuccess = isSuccess;
         Error     = error;
@@ -32,7 +32,7 @@ public sealed class Result<TValue> : Result
 
     public TValue Value => IsSuccess
         ? _value!
-        : throw new InvalidOperationException("Não é possível acessar o valor de um resultado de falha.");
+        : throw new InvalidOperationException("Cannot access the value of a failed result.");
 
     public static implicit operator Result<TValue>(TValue value)      => Result.Success(value);
     public static implicit operator Result<TValue>(DomainError error) => Result.Failure<TValue>(error);

@@ -1,20 +1,20 @@
-# Kong + Keycloak — Testes de Integração
+# Kong + Keycloak — Integration Tests
 
-> **Objetivo:** Verificar que Kong está protegendo as APIs corretamente via JWT RS256 + rate-limiting.
-> **Audiência:** Desenvolvedores e SREs
+> **Objective:** Verify that Kong is properly protecting APIs via JWT RS256 + rate-limiting.
+> **Audience:** Developers and SREs
 
-## Pré-requisitos
+## Prerequisites
 
-- `docker-compose up -d` executado e todos os inits com `Exited (0)`
-- Kong respondendo: `http://localhost:8001/status` (HTTP 200)
-- Keycloak respondendo: `http://localhost:8081/health/ready` (HTTP 200)
-- Realm `fincontrol` e clientes configurados (ver [KEYCLOAK_SETUP_GUIDE.md](KEYCLOAK_SETUP_GUIDE.md))
+- `docker-compose up -d` executed and all inits with `Exited (0)`
+- Kong responding: `http://localhost:8001/status` (HTTP 200)
+- Keycloak responding: `http://localhost:8081/health/ready` (HTTP 200)
+- `fincontrol` realm and clients configured (see [KEYCLOAK_SETUP_GUIDE.md](KEYCLOAK_SETUP_GUIDE.md))
 
 ---
 
-## Teste 1: Verificar Services e Routes no Kong
+## Test 1: Verify Services and Routes in Kong
 
-**Objetivo:** Confirmar que kong-init criou os services e routes com as URLs corretas.
+**Objective:** Confirm that kong-init created services and routes with correct URLs.
 
 **PowerShell:**
 ```powershell
@@ -28,27 +28,27 @@
 curl -s http://localhost:8001/services | jq '.data[] | {name, url}'
 ```
 
-**Resultado esperado:**
+**Expected result:**
 ```
 fincontrol-lancamentos  →  http://host.docker.internal:5083
 fincontrol-consolidados →  http://host.docker.internal:5260
 ```
 
-PASS → Services com URLs corretas (`5083` / `5260`)
-FAIL → Ver `docker-compose logs kong-init`
+PASS → Services with correct URLs (`5083` / `5260`)
+FAIL → See `docker-compose logs kong-init`
 
 ---
 
-## Teste 2: Verificar Plugins Ativos
+## Test 2: Verify Active Plugins
 
-**Objetivo:** Confirmar que `jwt`, `request-transformer`, `rate-limiting` e `proxy-cache` estão habilitados.
+**Objective:** Confirm that `jwt`, `request-transformer`, `rate-limiting` and `proxy-cache` are enabled.
 
 **Bash:**
 ```bash
 curl -s http://localhost:8001/plugins | jq '.data[] | {name, enabled}'
 ```
 
-**Resultado esperado:**
+**Expected result:**
 ```json
 {"name": "jwt",                 "enabled": true}
 {"name": "request-transformer", "enabled": true}
@@ -58,9 +58,9 @@ curl -s http://localhost:8001/plugins | jq '.data[] | {name, enabled}'
 
 ---
 
-## Teste 3: Obter Token JWT do Keycloak
+## Test 3: Get JWT Token from Keycloak
 
-**Objetivo:** Autenticar com Keycloak e obter JWT RS256.
+**Objective:** Authenticate with Keycloak and obtain RS256 JWT.
 
 **PowerShell:**
 ```powershell
@@ -84,30 +84,30 @@ TOKEN=$(curl -s -X POST \
 echo "Token: ${TOKEN:0:50}..."
 ```
 
-PASS → Token JWT retornado (string longa começando com `eyJ...`)
-FAIL → Verificar credenciais em [KEYCLOAK_SETUP_GUIDE.md](KEYCLOAK_SETUP_GUIDE.md)
+PASS → JWT token returned (long string starting with `eyJ...`)
+FAIL → Check credentials in [KEYCLOAK_SETUP_GUIDE.md](KEYCLOAK_SETUP_GUIDE.md)
 
 ---
 
-## Teste 4: Acesso Sem Token JWT (deve ser bloqueado)
+## Test 4: Access Without JWT Token (should be blocked)
 
-**Objetivo:** Confirmar que Kong rejeita requests sem `Authorization: Bearer`.
+**Objective:** Confirm that Kong rejects requests without `Authorization: Bearer`.
 
 **Bash:**
 ```bash
 curl -s -o /dev/null -w "%{http_code}" \
   http://localhost:8000/lancamentos/health
-# Esperado: 401
+# Expected: 401
 ```
 
-PASS → HTTP 401 com `{"message":"Unauthorized"}`
-FAIL → Plugin `jwt` não está ativo — ver Teste 2
+PASS → HTTP 401 with `{"message":"Unauthorized"}`
+FAIL → `jwt` plugin not active — see Test 2
 
 ---
 
-## Teste 5: Acesso Com Token JWT Válido (deve passar)
+## Test 5: Access With Valid JWT Token (should pass)
 
-**Objetivo:** Confirmar que Kong encaminha requests com JWT válido.
+**Objective:** Confirm that Kong forwards requests with valid JWT.
 
 **PowerShell:**
 ```powershell
@@ -121,32 +121,32 @@ Write-Host "Status: $($response.StatusCode)"
 curl -s -o /dev/null -w "%{http_code}" \
   -H "Authorization: Bearer $TOKEN" \
   http://localhost:8000/lancamentos/health
-# Esperado: 200
+# Expected: 200
 ```
 
 PASS → HTTP 200
-FAIL → Verificar token e configuração do plugin `jwt` no Kong
+FAIL → Check token and `jwt` plugin configuration in Kong
 
 ---
 
-## Teste 6: Token JWT Inválido (deve ser rejeitado)
+## Test 6: Invalid JWT Token (should be rejected)
 
 **Bash:**
 ```bash
 curl -s -o /dev/null -w "%{http_code}" \
   -H "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.invalid.invalid" \
   http://localhost:8000/lancamentos/health
-# Esperado: 401
+# Expected: 401
 ```
 
 PASS → HTTP 401
-FAIL → Plugin `jwt` não está validando assinatura
+FAIL → `jwt` plugin not validating signature
 
 ---
 
-## Teste 7: JWKS do Keycloak (chave pública RS256)
+## Test 7: Keycloak JWKS (RS256 public key)
 
-**Objetivo:** Confirmar que a chave pública usada para validar tokens está disponível.
+**Objective:** Confirm that the public key used to validate tokens is available.
 
 **Bash:**
 ```bash
@@ -154,7 +154,7 @@ curl -s http://localhost:8081/realms/fincontrol/protocol/openid-connect/certs | 
   jq '.keys[] | {kty, alg, use, kid}'
 ```
 
-**Resultado esperado:**
+**Expected result:**
 ```json
 {
   "kty": "RSA",
@@ -166,9 +166,9 @@ curl -s http://localhost:8081/realms/fincontrol/protocol/openid-connect/certs | 
 
 ---
 
-## Teste 8: OIDC Discovery do Keycloak
+## Test 8: Keycloak OIDC Discovery
 
-**Objetivo:** Confirmar endpoints do Keycloak.
+**Objective:** Confirm Keycloak endpoints.
 
 **Bash:**
 ```bash
@@ -176,7 +176,7 @@ curl -s http://localhost:8081/realms/fincontrol/.well-known/openid-configuration
   jq '{issuer, token_endpoint, jwks_uri}'
 ```
 
-**Resultado esperado:**
+**Expected result:**
 ```json
 {
   "issuer": "http://localhost:8081/realms/fincontrol",
@@ -187,9 +187,9 @@ curl -s http://localhost:8081/realms/fincontrol/.well-known/openid-configuration
 
 ---
 
-## Teste 9: Rate Limiting (Consolidado — 55 req/s)
+## Test 9: Rate Limiting (Consolidado — 55 req/s)
 
-**Objetivo:** Confirmar que o rate limiting está ativo nos headers de resposta.
+**Objective:** Confirm that rate limiting is active in response headers.
 
 **Bash:**
 ```bash
@@ -197,7 +197,7 @@ curl -s -I \
   -H "Authorization: Bearer $TOKEN" \
   "http://localhost:8000/consolidados/saldo?data-lancamento=2026-05-23" \
   | grep -i "ratelimit"
-# Esperado: X-RateLimit-Limit-Second: 55
+# Expected: X-RateLimit-Limit-Second: 55
 ```
 
 ---
@@ -206,36 +206,36 @@ curl -s -I \
 
 ```
 # Kong + Keycloak Integration Test Report
-Data: [DATA]
+Date: [DATE]
 
-| Teste | Status | Detalhes |
+| Test | Status | Details |
 |-------|--------|----------|
-| 1. Services/Routes (portas 5083/5260)  | PASS/FAIL | |
-| 2. Plugins ativos (jwt + rate-limiting)| PASS/FAIL | |
-| 3. Token Keycloak RS256                | PASS/FAIL | |
-| 4. Sem JWT → bloqueado                 | PASS/FAIL | HTTP 401 esperado |
-| 5. Com JWT válido → passa              | PASS/FAIL | HTTP 200 esperado |
-| 6. JWT inválido → bloqueado            | PASS/FAIL | HTTP 401 esperado |
-| 7. JWKS disponível                     | PASS/FAIL | |
+| 1. Services/Routes (ports 5083/5260)  | PASS/FAIL | |
+| 2. Active plugins (jwt + rate-limiting)| PASS/FAIL | |
+| 3. Keycloak RS256 token                | PASS/FAIL | |
+| 4. Without JWT → blocked               | PASS/FAIL | HTTP 401 expected |
+| 5. With valid JWT → passes             | PASS/FAIL | HTTP 200 expected |
+| 6. Invalid JWT → blocked               | PASS/FAIL | HTTP 401 expected |
+| 7. JWKS available                      | PASS/FAIL | |
 | 8. OIDC Discovery                      | PASS/FAIL | |
-| 9. Rate limiting nos headers           | PASS/FAIL | |
+| 9. Rate limiting in headers            | PASS/FAIL | |
 ```
 
 ---
 
 ## Troubleshooting
 
-| Problema | Solução |
+| Issue | Solution |
 |----------|---------|
-| `Connection refused` em :8000 | Kong não subiu — `docker-compose ps kong` |
-| `Unauthorized` com token válido | Verificar issuer — deve ser `http://localhost:8081/realms/fincontrol` |
-| Token expirado | Renovar token (TTL padrão: 300s) |
-| Services com portas erradas | `docker-compose logs kong-init` — verificar se usa `5083`/`5260` |
-| `502 Bad Gateway` | API .NET não está rodando — iniciar as APIs (ver [../README.md](../README.md)) |
-| kong-init não completou | `docker-compose logs kong-init` |
+| `Connection refused` on :8000 | Kong not running — `docker-compose ps kong` |
+| `Unauthorized` with valid token | Check issuer — must be `http://localhost:8081/realms/fincontrol` |
+| Token expired | Renew token (default TTL: 300s) |
+| Services with wrong ports | `docker-compose logs kong-init` — verify if using `5083`/`5260` |
+| `502 Bad Gateway` | .NET API not running — start APIs (see [../README.md](../README.md)) |
+| kong-init did not complete | `docker-compose logs kong-init` |
 
 ---
 
-**Versão:** 3.0
-**Última atualização:** Maio 2026
-**Status:** Ativo
+**Version:** 3.0
+**Last updated:** May 2026
+**Status:** Active

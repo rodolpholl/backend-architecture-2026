@@ -3,7 +3,7 @@
 public sealed class DomainError
 {
     public static readonly DomainError None = new(string.Empty, string.Empty, ErrorType.Failure);
-    public static readonly DomainError NullValue = new("General.Null", "Um valor nulo foi fornecido.", ErrorType.Failure);
+    public static readonly DomainError NullValue = new("General.Null", "A null value was provided.", ErrorType.Failure);
 
     public string Code { get; }
     public string Description { get; }

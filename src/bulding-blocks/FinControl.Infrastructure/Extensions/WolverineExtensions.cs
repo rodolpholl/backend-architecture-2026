@@ -14,32 +14,32 @@ using Wolverine.RabbitMQ;
 namespace FinControl.Infrastructure.Extensions;
 
 /// <summary>
-/// Extension method central para registrar Wolverine como mediator + bus + outbox.
+/// Central extension method to register Wolverine as mediator + bus + outbox.
 ///
-/// Wolverine unifica 3 responsabilidades sem dependências adicionais:
-///   1. Mediador in-process (substitui MediatR) — via IMessageBus.InvokeAsync()
-///   2. Message Bus distribuído — publica/consome do RabbitMQ
-///   3. Outbox nativo — persiste mensagens na mesma transação EF Core
+/// Wolverine unifies 3 responsibilities without additional dependencies:
+///   1. In-process mediator (replaces MediatR) — via IMessageBus.InvokeAsync()
+///   2. Distributed Message Bus — publishes/consumes from RabbitMQ
+///   3. Native Outbox — persists messages in the same EF Core transaction
 ///
-/// Padrão de handler por CONVENÇÃO (sem interface IRequestHandler):
+/// Handler pattern by CONVENTION (no IRequestHandler interface):
 ///
-///   public sealed class MinhaCommandHandler
+///   public sealed class MyCommandHandler
 ///   {
-///       public async Task&lt;Result&gt; Handle(MinhaCommand cmd, MeuDbContext db, CancellationToken ct)
+///       public async Task&lt;Result&gt; Handle(MyCommand cmd, MyDbContext db, CancellationToken ct)
 ///       { ... }
 ///   }
 ///
-/// O Wolverine descobre o handler por reflexão no assembly informado.
-/// O Outbox funciona automaticamente quando UseWolverineMessagestore() é configurado.
+/// Wolverine discovers the handler by reflection in the provided assembly.
+/// Outbox works automatically when UseWolverineMessagestore() is configured.
 /// </summary>
 public static class WolverineExtensions
 {
     /// <summary>
-    /// Registra Wolverine com:
-    ///   - Logging e Validation middlewares globais
-    ///   - Outbox nativo via EF Core (WolverineFx.EntityFrameworkCore)
-    ///   - RabbitMQ como transport distribuído
-    ///   - Descoberta de handlers nos assemblies informados
+    /// Registers Wolverine with:
+    ///   - Global logging and validation middlewares
+    ///   - Native Outbox via EF Core (WolverineFx.EntityFrameworkCore)
+    ///   - RabbitMQ as distributed transport
+    ///   - Handler discovery in provided assemblies
     /// </summary>
     public static WebApplicationBuilder AddFinControlWolverine<TDbContext>(
         this WebApplicationBuilder builder,
@@ -50,7 +50,7 @@ public static class WolverineExtensions
         // VaultKeys.RabbitMqUri → "rabbitmq:uri" (Vault path: dev/rabbitmq → uri)
         var rabbitMqUri = builder.Configuration[VaultKeys.RabbitMqUri];
         
-        // Em desenvolvimento, RabbitMQ é opcional
+        // In development, RabbitMQ is optional
         var isRabbitMqAvailable = !string.IsNullOrEmpty(rabbitMqUri);
 
         builder.Services.AddSingleton<IRabbitMqPublisher, RabbitMqPublisher>();
@@ -58,18 +58,18 @@ public static class WolverineExtensions
 
         builder.Host.UseWolverine(opts =>
         {
-            // ── Middlewares globais (ordem importa) ───────────────────────────
-            // 1. Logging ANTES: captura latência total inclusive de validações rejeitadas
-            // 2. Validation DEPOIS: valida e lança ValidationException antes do handler
+            // ── Global middlewares (order matters) ───────────────────────────
+            // 1. Logging FIRST: captures total latency including rejected validations
+            // 2. Validation THEN: validates and throws ValidationException before handler
             opts.Policies.AddMiddleware<LoggingMiddleware>();
             opts.Policies.AddMiddleware<FluentValidationMiddleware>();
 
-            // ── Outbox nativo via EF Core ──────────────────────────────────────
-            // Wolverine intercepta SaveChangesAsync() e envolve mensagens publicadas
-            // dentro da mesma transação do banco — sem tabela/serviço manual de Outbox.
+            // ── Native Outbox via EF Core ──────────────────────────────────────
+            // Wolverine intercepts SaveChangesAsync() and wraps published messages
+            // within the same database transaction — without manual Outbox table/service.
             opts.UseEntityFrameworkCoreTransactions();
 
-            // ── RabbitMQ transport (apenas se disponível) ───────────────────────
+            // ── RabbitMQ transport (only if available) ───────────────────────
             if (isRabbitMqAvailable)
             {
                 opts.UseRabbitMq(new Uri(rabbitMqUri!))
@@ -78,32 +78,32 @@ public static class WolverineExtensions
             else if (!builder.Environment.IsDevelopment())
             {
                 throw new InvalidOperationException(
-                    $"Secret '{VaultKeys.RabbitMqUri}' não encontrado no Vault (dev/rabbitmq → uri). " +
-                    "RabbitMQ é obrigatório em produção.");
+                    $"Secret '{VaultKeys.RabbitMqUri}' not found in Vault (dev/rabbitmq → uri). " +
+                    "RabbitMQ is required in production.");
             }
-            // Em desenvolvimento, usa apenas mediator in-process (sem RabbitMQ)
+            // In development, uses only in-process mediator (no RabbitMQ)
 
-            // ── Descoberta de handlers ─────────────────────────────────────────
-            // Wolverine varre os assemblies procurando métodos Handle/HandleAsync
-            // por convenção — sem necessidade de registrar manualmente cada handler.
+            // ── Handler discovery ─────────────────────────────────────────
+            // Wolverine scans the assemblies for Handle/HandleAsync methods
+            // by convention — without needing to manually register each handler.
             foreach (var assembly in handlerAssemblies)
                 opts.Discovery.IncludeAssembly(assembly);
 
-            // ── Configurações adicionais do módulo ────────────────────────────
+            // ── Module-specific configurations ────────────────────────
             configure?.Invoke(opts);
         });
 
         if (builder.Environment.IsDevelopment() && !isRabbitMqAvailable)
         {
-            Console.WriteLine("ℹ️  RabbitMQ não configurado - Wolverine rodará apenas em modo in-process (sem distribuição)");
+            Console.WriteLine("ℹ️  RabbitMQ not configured - Wolverine will run only in in-process mode (no distribution)");
         }
 
         return builder;
     }
 
     /// <summary>
-    /// Overload sem EF Core — para módulos que usam apenas Redis/cache e não possuem DbContext.
-    /// Idêntico ao genérico, mas sem <c>UseEntityFrameworkCoreTransactions()</c>.
+    /// Overload without EF Core — for modules that use only Redis/cache and don't have DbContext.
+    /// Identical to the generic, but without <c>UseEntityFrameworkCoreTransactions()</c>.
     /// </summary>
     public static WebApplicationBuilder AddFinControlWolverine(
         this WebApplicationBuilder builder,
@@ -128,8 +128,8 @@ public static class WolverineExtensions
             else if (!builder.Environment.IsDevelopment())
             {
                 throw new InvalidOperationException(
-                    $"Secret '{VaultKeys.RabbitMqUri}' não encontrado no Vault (dev/rabbitmq → uri). " +
-                    "RabbitMQ é obrigatório em produção.");
+                    $"Secret '{VaultKeys.RabbitMqUri}' not found in Vault (dev/rabbitmq → uri). " +
+                    "RabbitMQ is required in production.");
             }
 
             foreach (var assembly in handlerAssemblies)
@@ -140,14 +140,14 @@ public static class WolverineExtensions
 
         if (builder.Environment.IsDevelopment() && !isRabbitMqAvailable)
         {
-            Console.WriteLine("ℹ️  RabbitMQ não configurado - Wolverine rodará apenas em modo in-process (sem distribuição)");
+            Console.WriteLine("ℹ️  RabbitMQ not configured - Wolverine will run only in in-process mode (no distribution)");
         }
 
         return builder;
     }
 
     /// <summary>
-    /// Registra middlewares HTTP padrão do FinControl:
+    /// Registers standard FinControl HTTP middlewares:
     ///   - CorrelationId (extrai/gera X-Correlation-Id)
     ///   - ExceptionHandler global (ProblemDetails RFC 7807)
     /// </summary>

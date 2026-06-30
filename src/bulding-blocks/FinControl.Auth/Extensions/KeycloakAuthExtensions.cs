@@ -7,19 +7,19 @@ using Microsoft.IdentityModel.Tokens;
 namespace FinControl.Auth.Extensions;
 
 /// <summary>
-/// Configura autenticação JWT Bearer validando tokens emitidos pelo Keycloak.
+/// Configures JWT Bearer authentication validating tokens issued by Keycloak.
 ///
-/// O JwtBearer descobre automaticamente as chaves públicas (JWKS) via:
+/// JwtBearer automatically discovers public keys (JWKS) via:
 ///   {issuer}/.well-known/openid-configuration
 ///
-/// Validações ativas:
-///   - Assinatura (chave pública do Keycloak, renovada automaticamente)
-///   - Issuer (realm do Keycloak)
-///   - Lifetime (exp/nbf do token)
+/// Active validations:
+///   - Signature (Keycloak public key, automatically renewed)
+///   - Issuer (Keycloak realm)
+///   - Lifetime (exp/nbf of the token)
 ///
-/// Audience desabilitado intencionalmente: o claim "aud" do Keycloak varia
-/// conforme a configuração do client e pode conter ["account"] em vez do
-/// client ID da API. O Kong valida audience upstream via OIDC.
+/// Audience is intentionally disabled: the Keycloak "aud" claim varies
+/// depending on client configuration and may contain ["account"] instead of
+/// the API client ID. Kong validates audience upstream via OIDC.
 /// </summary>
 public static class KeycloakAuthExtensions
 {
@@ -31,13 +31,13 @@ public static class KeycloakAuthExtensions
         if (string.IsNullOrEmpty(issuer) && builder.Environment.IsDevelopment())
         {
             issuer = "http://localhost:8081/realms/fincontrol";
-            Console.WriteLine("ℹ️  Keycloak issuer não encontrado no Vault — usando default de desenvolvimento");
+            Console.WriteLine("ℹ️  Keycloak issuer not found in Vault — using development default");
         }
         else if (string.IsNullOrEmpty(issuer))
         {
             throw new InvalidOperationException(
-                $"Secret '{VaultKeys.KeycloakIssuer}' não encontrado no Vault. " +
-                "Configuração do Keycloak é obrigatória em produção.");
+                $"Secret '{VaultKeys.KeycloakIssuer}' not found in Vault. " +
+                "Keycloak configuration is required in production.");
         }
 
         var capturedIssuer = issuer;
@@ -46,11 +46,11 @@ public static class KeycloakAuthExtensions
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(opts =>
             {
-                // Dispara discovery automático do OIDC: {issuer}/.well-known/openid-configuration
-                // O JwtBearer baixa e renova as chaves JWKS automaticamente.
+                // Triggers automatic OIDC discovery: {issuer}/.well-known/openid-configuration
+                // JwtBearer downloads and automatically renews JWKS keys.
                 opts.Authority = capturedIssuer;
 
-                // Em desenvolvimento, Keycloak roda sem TLS
+                // In development, Keycloak runs without TLS
                 opts.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
 
                 opts.TokenValidationParameters = new TokenValidationParameters

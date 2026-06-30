@@ -7,19 +7,19 @@ using Microsoft.Extensions.Logging;
 namespace FinControl.Infrastructure.Middleware;
 
 /// <summary>
-/// Handler global de exceções não tratadas.
+/// Global handler for unhandled exceptions.
 ///
-/// Intercepta exceções e mapeia para ProblemDetails (RFC 7807), mantendo o CorrelationId.
+/// Intercepts exceptions and maps them to ProblemDetails (RFC 7807), maintaining the CorrelationId.
 ///
-/// Mapeamentos:
-///   ValidationException (FluentValidation) → 400 com lista de erros por campo
-///   ArgumentException                      → 400 requisição inválida
+/// Mappings:
+///   ValidationException (FluentValidation) → 400 with list of errors per field
+///   ArgumentException                      → 400 invalid request
 ///   UnauthorizedAccessException            → 401
 ///   KeyNotFoundException                   → 404
 ///   InvalidOperationException              → 422
-///   Exception (qualquer outra)             → 500
+///   Exception (any other)                  → 500
 ///
-/// Registrar via:
+/// Register via:
 ///   services.AddExceptionHandler&lt;GlobalExceptionHandler&gt;();
 ///   services.AddProblemDetails();
 ///   app.UseExceptionHandler();
@@ -35,25 +35,25 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
         var correlationId = httpContext.Items["X-Correlation-Id"]?.ToString()
                             ?? Guid.NewGuid().ToString("D");
 
-        // ValidationException do FluentValidation — pipeline do Wolverine a lançou antes do handler
+        // ValidationException from FluentValidation — Wolverine pipeline threw it before handler
         if (exception is ValidationException validationEx)
         {
             logger.LogWarning(
-                "Validação falhou. CorrelationId: {CorrelationId} | Erros: {Errors}",
+                "Validation failed. CorrelationId: {CorrelationId} | Errors: {Errors}",
                 correlationId,
                 string.Join(" | ", validationEx.Errors.Select(e => $"{e.PropertyName}: {e.ErrorMessage}")));
 
-            var errosPorCampo = validationEx.Errors
+            var errorsByField = validationEx.Errors
                 .GroupBy(e => e.PropertyName)
                 .ToDictionary(
                     g => g.Key,
                     g => g.Select(e => e.ErrorMessage).ToArray());
 
-            var validationProblem = new ValidationProblemDetails(errosPorCampo)
+            var validationProblem = new ValidationProblemDetails(errorsByField)
             {
                 Status = StatusCodes.Status400BadRequest,
-                Title = "Erro de validação",
-                Detail = "Um ou mais campos possuem valores inválidos.",
+                Title = "Validation error",
+                Detail = "One or more fields have invalid values.",
                 Extensions = { ["correlationId"] = correlationId }
             };
 
@@ -62,20 +62,20 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
             return true;
         }
 
-        // Demais exceções
+        // Other exceptions
         logger.LogError(
             exception,
-            "Exceção não tratada. CorrelationId: {CorrelationId} | Path: {Path}",
+            "Unhandled exception. CorrelationId: {CorrelationId} | Path: {Path}",
             correlationId,
             httpContext.Request.Path);
 
         var (status, title) = exception switch
         {
-            ArgumentException           => (StatusCodes.Status400BadRequest,           "Requisição inválida"),
-            UnauthorizedAccessException => (StatusCodes.Status401Unauthorized,         "Não autorizado"),
-            KeyNotFoundException        => (StatusCodes.Status404NotFound,             "Recurso não encontrado"),
-            InvalidOperationException   => (StatusCodes.Status422UnprocessableEntity,  "Operação inválida"),
-            _                           => (StatusCodes.Status500InternalServerError,  "Erro interno do servidor")
+            ArgumentException           => (StatusCodes.Status400BadRequest,           "Invalid request"),
+            UnauthorizedAccessException => (StatusCodes.Status401Unauthorized,         "Unauthorized"),
+            KeyNotFoundException        => (StatusCodes.Status404NotFound,             "Resource not found"),
+            InvalidOperationException   => (StatusCodes.Status422UnprocessableEntity,  "Invalid operation"),
+            _                           => (StatusCodes.Status500InternalServerError,  "Internal server error")
         };
 
         var problem = new ProblemDetails

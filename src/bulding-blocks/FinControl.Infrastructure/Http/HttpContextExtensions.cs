@@ -3,30 +3,30 @@ using Microsoft.AspNetCore.Http;
 namespace FinControl.Infrastructure.Http;
 
 /// <summary>
-/// Extensões para HttpContext para facilitar extração de dados comuns.
+/// Extensions for HttpContext to facilitate common data extraction.
 /// </summary>
 public static class HttpContextExtensions
 {
     /// <summary>
-    /// Extrai dados de identificação do usuário autenticado via JWT.
+    /// Extracts user identification data authenticated via JWT.
     /// </summary>
-    /// <param name="httpContext">Contexto HTTP.</param>
-    /// <returns>Tupla com (ID, Nome, Email) do usuário.</returns>
-    /// <exception cref="InvalidOperationException">Se usuário não autenticado ou claims ausentes.</exception>
+    /// <param name="httpContext">HTTP context.</param>
+    /// <returns>Tuple with (ID, Name, Email) of the user.</returns>
+    /// <exception cref="InvalidOperationException">If user not authenticated or claims missing.</exception>
     public static (string Id, string Nome, string Email) ExtractUserData(this HttpContext httpContext)
     {
         if (httpContext?.User == null)
-            throw new InvalidOperationException("HttpContext.User é nulo.");
+            throw new InvalidOperationException("HttpContext.User is null.");
 
         return JwtClaimsExtractor.ExtractUserData(httpContext.User);
     }
 
     /// <summary>
-    /// Extrai a correlation ID do header ou gera uma nova.
+    /// Extracts the correlation ID from the header or generates a new one.
     /// </summary>
-    /// <param name="httpContext">Contexto HTTP.</param>
-    /// <param name="headerName">Nome do header. Padrão: "x-correlation-id".</param>
-    /// <returns>Guid da correlação.</returns>
+    /// <param name="httpContext">HTTP context.</param>
+    /// <param name="headerName">Header name. Default: "x-correlation-id".</param>
+    /// <returns>Correlation Guid.</returns>
     public static Guid ExtractCorrelationId(
         this HttpContext httpContext,
         string headerName = "x-correlation-id")
@@ -38,11 +38,11 @@ public static class HttpContextExtensions
     }
 
     /// <summary>
-    /// Extrai a chave de idempotência do header ou gera uma nova.
+    /// Extracts the idempotency key from the header or generates a new one.
     /// </summary>
-    /// <param name="httpContext">Contexto HTTP.</param>
-    /// <param name="headerName">Nome do header. Padrão: "idempotency-key".</param>
-    /// <returns>Guid de idempotência.</returns>
+    /// <param name="httpContext">HTTP context.</param>
+    /// <param name="headerName">Header name. Default: "idempotency-key".</param>
+    /// <returns>Idempotency Guid.</returns>
     public static Guid ExtractIdempotencyKey(
         this HttpContext httpContext,
         string headerName = "idempotency-key")
@@ -54,11 +54,11 @@ public static class HttpContextExtensions
     }
 
     /// <summary>
-    /// Extrai um header genérico do request.
+    /// Extracts a generic header from the request.
     /// </summary>
-    /// <param name="httpContext">Contexto HTTP.</param>
-    /// <param name="headerName">Nome do header.</param>
-    /// <returns>Amount do header ou null.</returns>
+    /// <param name="httpContext">HTTP context.</param>
+    /// <param name="headerName">Header name.</param>
+    /// <returns>Header value or null.</returns>
     public static string? ExtractHeader(this HttpContext httpContext, string headerName)
     {
         if (httpContext?.Request?.Headers == null)
@@ -68,11 +68,11 @@ public static class HttpContextExtensions
     }
 
     /// <summary>
-    /// Adiciona um header à resposta HTTP.
+    /// Adds a header to the HTTP response.
     /// </summary>
-    /// <param name="httpContext">Contexto HTTP.</param>
-    /// <param name="headerName">Nome do header.</param>
-    /// <param name="headerValue">Amount do header.</param>
+    /// <param name="httpContext">HTTP context.</param>
+    /// <param name="headerName">Header name.</param>
+    /// <param name="headerValue">Header value.</param>
     public static void AddResponseHeader(
         this HttpContext httpContext,
         string headerName,
@@ -83,11 +83,11 @@ public static class HttpContextExtensions
     }
 
     /// <summary>
-    /// Adiciona headers de rastreamento (correlation ID e idempotency key) à resposta.
+    /// Adds tracing headers (correlation ID and idempotency key) to the response.
     /// </summary>
-    /// <param name="httpContext">Contexto HTTP.</param>
-    /// <param name="correlationId">ID de correlação.</param>
-    /// <param name="idempotencyKey">Chave de idempotência.</param>
+    /// <param name="httpContext">HTTP context.</param>
+    /// <param name="correlationId">Correlation ID.</param>
+    /// <param name="idempotencyKey">Idempotency key.</param>
     public static void AddTracingHeaders(
         this HttpContext httpContext,
         Guid correlationId,

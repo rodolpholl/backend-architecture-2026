@@ -1,74 +1,74 @@
-# Kong + Keycloak — Integração JWT RS256
+# Kong + Keycloak — JWT RS256 Integration
 
-> **Objetivo:** Descrever como o Kong autentica requisições usando JWT RS256 emitido pelo Keycloak.
-> **Status:** Configuração automática via `kong-init`
+> **Objective:** Describe how Kong authenticates requests using JWT RS256 issued by Keycloak.
+> **Status:** Automatic configuration via `kong-init`
 
 ---
 
-## Visão Geral
+## Overview
 
-O Kong valida tokens JWT usando a **chave pública RS256 do Keycloak**, registrada como credencial no plugin `jwt` nativo do Kong. Nenhum plugin OIDC é necessário.
+Kong validates JWT tokens using the **Keycloak RS256 public key**, registered as a credential in Kong's native `jwt` plugin. No OIDC plugin is necessary.
 
-Além disso, o Kong injeta o header `X-Subscription-Key` automaticamente via `request-transformer`, que é então validado pelo `SubscriptionKeyMiddleware` dentro de cada API .NET.
+Additionally, Kong injects the `X-Subscription-Key` header automatically via `request-transformer`, which is then validated by `SubscriptionKeyMiddleware` inside each .NET API.
 
 ```
-Cliente
+Client
     |
     | GET /consolidados/saldo  +  Authorization: Bearer <JWT RS256>
     v
 Kong Gateway (:8000)
-    |-- 1. jwt plugin:               valida assinatura RS256 com chave pública do Keycloak
-    |-- 2. request-transformer:      injeta X-Subscription-Key no header upstream
-    |-- 3. rate-limiting:            300 req/min (Lançamentos) | 55 req/s (Consolidado)
-    |-- 4. proxy-cache:              cache GET /consolidados por 30s
+    |-- 1. jwt plugin:               validates RS256 signature with Keycloak public key
+    |-- 2. request-transformer:      injects X-Subscription-Key in upstream header
+    |-- 3. rate-limiting:            300 req/min (Lancamentos) | 55 req/s (Consolidado)
+    |-- 4. proxy-cache:              cache GET /consolidados for 30s
     |
-    v (se JWT válido)
-FinControl.Lancamentos.API (:5083)  ou  FinControl.Consolidado.API (:5260)
+    v (if JWT valid)
+FinControl.Lancamentos.API (:5083)  or  FinControl.Consolidado.API (:5260)
     |
     v
-SubscriptionKeyMiddleware (segunda camada de validação interna)
+SubscriptionKeyMiddleware (second internal validation layer)
 ```
 
 ---
 
-## Plugins Kong Configurados
+## Configured Kong Plugins
 
-| Plugin | Escopo | Configuração |
+| Plugin | Scope | Configuration |
 |--------|--------|--------------|
-| `jwt` | Global | RS256; `key_claim_name = iss`; chave pública do Keycloak registrada por consumer |
-| `request-transformer` | Por service | Injeta `X-Subscription-Key` no upstream |
-| `rate-limiting` | Por route | 300 req/min (Lançamentos) · 55 req/s (Consolidado) |
-| `proxy-cache` | Consolidado | Cache GET por 30s; estratégia `cache-control` |
+| `jwt` | Global | RS256; `key_claim_name = iss`; Keycloak public key registered per consumer |
+| `request-transformer` | Per service | Injects `X-Subscription-Key` upstream |
+| `rate-limiting` | Per route | 300 req/min (Lancamentos) · 55 req/s (Consolidado) |
+| `proxy-cache` | Consolidado | Cache GET for 30s; `cache-control` strategy |
 
 ---
 
-## Services e Routes
+## Services and Routes
 
-| Service | URL interna (Docker) | Route path |
+| Service | Internal URL (Docker) | Route path |
 |---------|----------------------|-----------|
 | `fincontrol-lancamentos` | `http://host.docker.internal:5083` | `/lancamentos` |
 | `fincontrol-consolidados` | `http://host.docker.internal:5260` | `/consolidados` |
 
 ---
 
-## Como o JWT Plugin Funciona com Keycloak
+## How the JWT Plugin Works with Keycloak
 
-O Kong `jwt` plugin valida o token sem chamar o Keycloak em runtime — usa a chave pública pre-registrada:
+Kong's `jwt` plugin validates the token without calling Keycloak at runtime — it uses the pre-registered public key:
 
 ```
-Keycloak emite JWT (RS256)
+Keycloak issues JWT (RS256)
     └─ Header: { "alg": "RS256", "kid": "..." }
     └─ Claims: { "iss": "http://localhost:8081/realms/fincontrol", "sub": "...", ... }
 
-Kong recebe o token:
-    1. Lê o claim configurado em key_claim_name (padrão: iss)
-    2. Busca consumer com credencial JWT correspondente ao issuer
-    3. Valida assinatura com a chave pública registrada
-    4. Se válido → encaminha ao upstream
-    5. Se inválido → HTTP 401
+Kong receives the token:
+    1. Reads the claim configured in key_claim_name (default: iss)
+    2. Finds consumer with JWT credential corresponding to the issuer
+    3. Validates signature with registered public key
+    4. If valid → forwards to upstream
+    5. If invalid → HTTP 401
 ```
 
-A chave pública do Keycloak é obtida via:
+Keycloak's public key is obtained via:
 ```bash
 curl -s http://localhost:8081/realms/fincontrol/protocol/openid-connect/certs | jq '.keys[0]'
 ```
@@ -77,25 +77,25 @@ curl -s http://localhost:8081/realms/fincontrol/protocol/openid-connect/certs | 
 
 ## Quick Start
 
-### 1. Iniciar infraestrutura
+### 1. Start infrastructure
 
 ```bash
 docker-compose up -d
 ```
 
-Aguardar todos os init containers terminarem com `Exited (0)`.
+Wait for all init containers to exit with `Exited (0)`.
 
-### 2. Verificar que Kong está configurado
+### 2. Verify Kong is configured
 
 ```bash
-# Listar services
+# List services
 curl -s http://localhost:8001/services | jq '.data[].name'
 
-# Listar plugins ativos
+# List active plugins
 curl -s http://localhost:8001/plugins | jq '.data[] | {name, enabled}'
 ```
 
-Resultado esperado:
+Expected result:
 ```json
 {"name": "jwt",                "enabled": true}
 {"name": "request-transformer","enabled": true}
@@ -103,7 +103,7 @@ Resultado esperado:
 {"name": "proxy-cache",        "enabled": true}
 ```
 
-### 3. Obter token JWT do Keycloak
+### 3. Get JWT token from Keycloak
 
 ```bash
 TOKEN=$(curl -s -X POST \
@@ -117,10 +117,10 @@ TOKEN=$(curl -s -X POST \
   | jq -r '.access_token')
 ```
 
-### 4. Fazer requisição autenticada
+### 4. Make authenticated request
 
 ```bash
-# Lançamentos
+# Lancamentos
 curl -s -w "\nHTTP %{http_code}\n" \
   http://localhost:8000/lancamentos/health \
   -H "Authorization: Bearer $TOKEN"
@@ -133,9 +133,9 @@ curl -s -w "\nHTTP %{http_code}\n" \
 
 ---
 
-## Configuração Manual (se kong-init falhar)
+## Manual Configuration (if kong-init fails)
 
-### Criar Service — Lançamentos
+### Create Service — Lancamentos
 
 ```bash
 curl -X POST http://localhost:8001/services \
@@ -143,7 +143,7 @@ curl -X POST http://localhost:8001/services \
   -d url=http://host.docker.internal:5083
 ```
 
-### Criar Service — Consolidado
+### Create Service — Consolidado
 
 ```bash
 curl -X POST http://localhost:8001/services \
@@ -151,7 +151,7 @@ curl -X POST http://localhost:8001/services \
   -d url=http://host.docker.internal:5260
 ```
 
-### Criar Routes
+### Create Routes
 
 ```bash
 curl -X POST http://localhost:8001/services/fincontrol-lancamentos/routes \
@@ -163,7 +163,7 @@ curl -X POST http://localhost:8001/services/fincontrol-consolidados/routes \
   -d "paths[]=/consolidados"
 ```
 
-### Habilitar JWT Plugin
+### Enable JWT Plugin
 
 ```bash
 curl -X POST http://localhost:8001/plugins \
@@ -172,25 +172,25 @@ curl -X POST http://localhost:8001/plugins \
   -d "config.key_claim_name=iss"
 ```
 
-### Criar Consumer com credencial JWT (chave pública do Keycloak)
+### Create Consumer with JWT credential (Keycloak public key)
 
 ```bash
-# Criar consumer
+# Create consumer
 curl -X POST http://localhost:8001/consumers \
   -d username=fincontrol-keycloak-consumer
 
-# Registrar chave pública RS256
-# (substitua RSA_PUBLIC_KEY pela chave pública obtida do Keycloak JWKS)
+# Register RS256 public key
+# (replace RSA_PUBLIC_KEY with public key obtained from Keycloak JWKS)
 curl -X POST http://localhost:8001/consumers/fincontrol-keycloak-consumer/jwt \
   -d algorithm=RS256 \
   -d "key=http://localhost:8081/realms/fincontrol" \
   -d "rsa_public_key=<RSA_PUBLIC_KEY>"
 ```
 
-### Habilitar Rate Limiting
+### Enable Rate Limiting
 
 ```bash
-# Lançamentos — 300 req/min
+# Lancamentos — 300 req/min
 curl -X POST http://localhost:8001/services/fincontrol-lancamentos/plugins \
   -d name=rate-limiting \
   -d "config.minute=300" \
@@ -203,7 +203,7 @@ curl -X POST http://localhost:8001/services/fincontrol-consolidados/plugins \
   -d "config.policy=local"
 ```
 
-### Habilitar Proxy Cache (Consolidado)
+### Enable Proxy Cache (Consolidado)
 
 ```bash
 curl -X POST http://localhost:8001/services/fincontrol-consolidados/plugins \
@@ -217,18 +217,18 @@ curl -X POST http://localhost:8001/services/fincontrol-consolidados/plugins \
 
 ## Troubleshooting
 
-| Problema | Solução |
+| Issue | Solution |
 |----------|---------|
-| `No API key found in request` | O JWT está ausente ou malformado no header `Authorization` |
-| `Invalid signature` | Chave pública registrada no Kong não corresponde ao issuer do token |
-| `Unauthorized` (401) | Token expirado (TTL: 300s) — use o `refresh_token` para renovar (ver [REFRESH_TOKEN_FLOW.md](REFRESH_TOKEN_FLOW.md)) |
-| `403 Rate limit exceeded` | Aguarde ou ajuste `config.minute`/`config.second` no plugin |
-| kong-init falhou | `docker-compose logs kong-init` para diagnóstico |
-| JWKS não disponível | Verificar se Keycloak está healthy: `http://localhost:8081/health/ready` |
+| `No API key found in request` | JWT is missing or malformed in `Authorization` header |
+| `Invalid signature` | Public key registered in Kong does not match token issuer |
+| `Unauthorized` (401) | Token expired (TTL: 300s) — use `refresh_token` to renew (see [REFRESH_TOKEN_FLOW.md](REFRESH_TOKEN_FLOW.md)) |
+| `403 Rate limit exceeded` | Wait or adjust `config.minute`/`config.second` in plugin |
+| kong-init failed | `docker-compose logs kong-init` for diagnostics |
+| JWKS not available | Verify Keycloak is healthy: `http://localhost:8081/health/ready` |
 
 ---
 
-## Referências
+## References
 
 - [Kong JWT Plugin](https://docs.konghq.com/hub/kong-inc/jwt/)
 - [Kong Rate Limiting Plugin](https://docs.konghq.com/hub/kong-inc/rate-limiting/)
@@ -236,10 +236,10 @@ curl -X POST http://localhost:8001/services/fincontrol-consolidados/plugins \
 - [Keycloak JWKS](https://www.keycloak.org/docs/latest/securing_apps/#_certificate_endpoint)
 - [KEYCLOAK_SETUP_GUIDE.md](KEYCLOAK_SETUP_GUIDE.md)
 - [KONG_KEYCLOAK_TESTS.md](KONG_KEYCLOAK_TESTS.md)
-- [REFRESH_TOKEN_FLOW.md](REFRESH_TOKEN_FLOW.md) — ciclo de vida dos tokens e fluxo de refresh no cliente
+- [REFRESH_TOKEN_FLOW.md](REFRESH_TOKEN_FLOW.md) — token lifecycle and refresh flow in client
 
 ---
 
-**Versão:** 3.0
-**Última atualização:** Maio 2026
-**Status:** Ativo — configuração automatizada via kong-init
+**Version:** 3.0
+**Last updated:** May 2026
+**Status:** Active — automated configuration via kong-init

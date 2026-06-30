@@ -7,8 +7,8 @@ using RabbitMQ.Client;
 namespace FinControl.Infrastructure.Messaging;
 
 /// <summary>
-/// Publica mensagens diretamente em um exchange RabbitMQ via AMQP.
-/// Mantém uma única IConnection reutilizável (thread-safe) e cria um IChannel por publicação.
+/// Publishes messages directly to a RabbitMQ exchange via AMQP.
+/// Maintains a single reusable IConnection (thread-safe) and creates an IChannel per publish.
 /// </summary>
 public sealed class RabbitMqPublisher : IRabbitMqPublisher, IAsyncDisposable
 {
@@ -34,7 +34,7 @@ public sealed class RabbitMqPublisher : IRabbitMqPublisher, IAsyncDisposable
         if (string.IsNullOrEmpty(_rabbitMqUri))
         {
             _logger.LogWarning(
-                "RabbitMQ não configurado — mensagem {MessageType} descartada (exchange={Exchange} routingKey={RoutingKey}).",
+                "RabbitMQ not configured — message {MessageType} discarded (exchange={Exchange} routingKey={RoutingKey}).",
                 typeof(T).Name, exchange, routingKey);
             return;
         }
@@ -55,7 +55,7 @@ public sealed class RabbitMqPublisher : IRabbitMqPublisher, IAsyncDisposable
 
         if (_logger.IsEnabled(LogLevel.Information))
             _logger.LogInformation(
-                "Mensagem {MessageType} publicada | Exchange={Exchange} RoutingKey={RoutingKey}",
+                "Message {MessageType} published | Exchange={Exchange} RoutingKey={RoutingKey}",
                 typeof(T).Name, exchange, routingKey);
     }
 
@@ -76,7 +76,7 @@ public sealed class RabbitMqPublisher : IRabbitMqPublisher, IAsyncDisposable
 
             var factory = new ConnectionFactory { Uri = new Uri(_rabbitMqUri!) };
             _connection = await factory.CreateConnectionAsync(ct);
-            _logger.LogInformation("RabbitMqPublisher: nova conexão estabelecida.");
+            _logger.LogInformation("RabbitMqPublisher: new connection established.");
             return _connection;
         }
         finally
@@ -94,7 +94,7 @@ public sealed class RabbitMqPublisher : IRabbitMqPublisher, IAsyncDisposable
         if (string.IsNullOrEmpty(_rabbitMqUri))
         {
             _logger.LogWarning(
-                "RabbitMQ não configurado — payload descartado (exchange={Exchange} routingKey={RoutingKey}).",
+                "RabbitMQ not configured — payload discarded (exchange={Exchange} routingKey={RoutingKey}).",
                 exchange, routingKey);
             return;
         }
@@ -115,7 +115,7 @@ public sealed class RabbitMqPublisher : IRabbitMqPublisher, IAsyncDisposable
 
         if (_logger.IsEnabled(LogLevel.Information))
             _logger.LogInformation(
-                "Payload publicado | Exchange={Exchange} RoutingKey={RoutingKey}",
+                "Payload published | Exchange={Exchange} RoutingKey={RoutingKey}",
                 exchange, routingKey);
     }
 

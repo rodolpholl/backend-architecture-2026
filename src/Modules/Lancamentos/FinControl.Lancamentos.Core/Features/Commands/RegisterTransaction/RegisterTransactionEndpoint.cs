@@ -8,43 +8,43 @@ using Wolverine.Http;
 namespace FinControl.Transactions.Core.Features.Commands.RegisterTransaction;
 
 /// <summary>
-/// Request DTO para o endpoint POST /lancamentos/registrar.
-/// Estrutura de entrada do cliente (sem informações de auditoria que vêm do contexto).
+/// Request DTO for the POST /lancamentos/registrar endpoint.
+/// Input structure from the client (without audit information that comes from context).
 /// </summary>
 public record RegisterTransactionRequest(
     /// <summary>
-    /// Category do lançamento.
+    /// Transaction category.
     /// </summary>
     TransactionCategory Category,
 
     /// <summary>
-    /// Amount em centavos.
+    /// Amount in cents.
     /// </summary>
     long Amount,
 
     /// <summary>
-    /// Descrição opcional.
+    /// Optional description.
     /// </summary>
     string? Description = null,
 
     /// <summary>
-    /// Data do lançamento (opcional, usa UTC now se omitida).
-    /// Aceita formatos: "2024-05-22T10:30:00Z", "2024-05-22T10:30:00+00:00", "2024-05-22T10:30:00-03:00".
+    /// Transaction date (optional, uses UTC now if omitted).
+    /// Accepts formats: "2024-05-22T10:30:00Z", "2024-05-22T10:30:00+00:00", "2024-05-22T10:30:00-03:00".
     /// </summary>
     DateTimeOffset? TransactionDate = null
 );
 
 /// <summary>
-/// Endpoint HTTP para registrar um novo lançamento.
-/// Implements Vertical Slicing com Wolverine minimal APIs.
-/// Extrai dados do usuário diretamente do JWT do Keycloak usando utilitários da Infrastructure.
-/// 
-/// Padrão Wolverine: O método "Handle" com atributo [WolverinePost] é descoberto automaticamente.
+/// HTTP endpoint to register a new transaction.
+/// Implements Vertical Slicing with Wolverine minimal APIs.
+/// Extracts user data directly from Keycloak JWT using Infrastructure utilities.
+///
+/// Wolverine pattern: The "Handle" method with [WolverinePost] attribute is auto-discovered.
 /// </summary>
 public class RegisterTransactionEndpoint
 {
     /// <summary>
-    /// Handler do endpoint - descoberto automaticamente pelo Wolverine.
+    /// Endpoint handler - auto-discovered by Wolverine.
     /// </summary>
     [Authorize]
     [WolverinePost("/lancamentos/registrar")]
@@ -54,18 +54,18 @@ public class RegisterTransactionEndpoint
         IMessageBus bus,
         CancellationToken cancellationToken = default)
     {
-        // 1. Validar autenticação
+        // 1. Validate authentication
         if (httpContext.User?.Identity?.IsAuthenticated != true)
         {
-            throw new InvalidOperationException("Usuário não autenticado. Token JWT inválido ou expirado.");
+            throw new InvalidOperationException("User not authenticated. JWT token is invalid or expired.");
         }
 
-        // 2. Extrair dados do usuário e rastreamento usando extensões da Infrastructure
+        // 2. Extract user data and tracing using Infrastructure extensions
         var (usuarioId, usuarioNome, usuarioEmail) = httpContext.ExtractUserData();
         var correlationId = httpContext.ExtractCorrelationId();
         var idempotencyKey = httpContext.ExtractIdempotencyKey();
 
-        // 3. Construir command com dados do contexto
+        // 3. Build command with context data
         var command = new RegisterTransactionCommand
         {
             Category = request.Category,

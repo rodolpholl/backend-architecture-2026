@@ -8,15 +8,15 @@ using StackExchange.Redis;
 namespace FinControl.Infrastructure.Extensions;
 
 /// <summary>
-/// Registra o Redis como IDistributedCache com a connection string proveniente do Vault.
+/// Registers Redis as IDistributedCache with connection string from Vault.
 ///
-/// A connection string deve estar no Vault no path configurado,
-/// com chave: ConnectionStrings__Redis
-/// (o provider normaliza "__" → ":" no IConfiguration).
+/// The connection string must be in Vault in the configured path,
+/// with key: ConnectionStrings__Redis
+/// (the provider normalizes "__" → ":" in IConfiguration).
 ///
-/// Uso:
+/// Usage:
 ///   builder.AddFinControlRedis();
-///   // registra IDistributedCache (Redis) + RedisCacheService
+///   // registers IDistributedCache (Redis) + RedisCacheService
 /// </summary>
 public static class RedisExtensions
 {
@@ -25,8 +25,8 @@ public static class RedisExtensions
         // VaultKeys.RedisConnection → "redis:connection_string" (Vault path: dev/redis → connection_string)
         var connectionString = builder.Configuration[VaultKeys.RedisConnection]
             ?? throw new InvalidOperationException(
-                $"Secret '{VaultKeys.RedisConnection}' não encontrado no Vault (dev/redis → connection_string). " +
-                "Certifique-se de que o Vault está configurado antes de registrar o Redis.");
+                $"Secret '{VaultKeys.RedisConnection}' not found in Vault (dev/redis → connection_string). " +
+                "Ensure that Vault is configured before registering Redis.");
 
         builder.Services.AddStackExchangeRedisCache(options =>
         {
@@ -34,7 +34,7 @@ public static class RedisExtensions
             options.InstanceName = "FinControl:";
         });
 
-        // IConnectionMultiplexer compartilhado: usado por RedisCacheService e IRedisLockService
+        // Shared IConnectionMultiplexer: used by RedisCacheService and IRedisLockService
         builder.Services.AddSingleton<IConnectionMultiplexer>(
             _ => ConnectionMultiplexer.Connect(connectionString));
 

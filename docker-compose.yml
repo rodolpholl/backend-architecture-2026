@@ -1,6 +1,6 @@
 services:
-  # PostgreSQL - Banco de dados transacional único
-  # Suporta múltiplos databases e schemas para diferentes serviços
+  # PostgreSQL - Single transactional database
+  # Supports multiple databases and schemas for different services
   postgres:
     image: postgres:17-alpine
     container_name: fincontrol-postgres
@@ -34,7 +34,7 @@ services:
           cpus: '2'
           memory: 1G
 
-  # Redis - Cache distribuído
+  # Redis - Distributed cache
   redis:
     image: redis:7.4-alpine
     container_name: fincontrol-redis
@@ -62,7 +62,7 @@ services:
           cpus: '1'
           memory: 512M
 
-  # RabbitMQ - Message Broker nativo do Wolverine
+  # RabbitMQ - Native Message Broker for Wolverine
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: fincontrol-rabbitmq
@@ -130,7 +130,7 @@ services:
           cpus: '0.5'
           memory: 256M
 
-  # Vault Init - Inicializa secrets no Vault após startup
+  # Vault Init - Initialize secrets in Vault after startup
   vault-init:
     image: alpine:3.21
     container_name: fincontrol-vault-init
@@ -150,11 +150,11 @@ services:
       - -c
       - |
         set -e
-        echo "📦 Instalando dependências..."
+        echo "📦 Installing dependencies..."
         apk add --no-cache bash curl
-        echo "🔐 Iniciando Vault..."
+        echo "🔐 Initializing Vault..."
         /bin/bash /scripts/init-vault.sh
-        echo "✅ Vault inicializado com sucesso!"
+        echo "✅ Vault initialized successfully!"
     restart: no
     logging:
       driver: "json-file"
@@ -195,7 +195,7 @@ services:
           cpus: '0.5'
           memory: 256M
 
-  # Grafana Loki - Agregação de Logs
+  # Grafana Loki - Log Aggregation
   loki:
     image: grafana/loki:3.3.0
     container_name: fincontrol-loki
@@ -225,7 +225,7 @@ services:
           cpus: '0.5'
           memory: 256M
 
-  # Prometheus - Coleta de Métricas
+  # Prometheus - Metrics Collection
   prometheus:
     image: prom/prometheus:latest
     container_name: fincontrol-prometheus
@@ -258,7 +258,7 @@ services:
           cpus: '0.5'
           memory: 256M
 
-  # Grafana - Dashboards de Visualização
+  # Grafana - Visualization Dashboards
   grafana:
     image: grafana/grafana:11.4.0
     container_name: fincontrol-grafana
@@ -392,7 +392,7 @@ services:
           cpus: '1'
           memory: 512M
 
-  # Keycloak-Init - Configura Realm, Clients, Roles e Usuários no Keycloak
+  # Keycloak-Init - Configure Realm, Clients, Roles and Users in Keycloak
   keycloak-init:
     image: alpine:3.21
     container_name: fincontrol-keycloak-init
@@ -418,11 +418,11 @@ services:
       - -c
       - |
         set -e
-        echo "📦 Instalando dependências..."
+        echo "📦 Installing dependencies..."
         apk add --no-cache bash curl jq
-        echo "🔐 Inicializando Keycloak..."
+        echo "🔐 Initializing Keycloak..."
         /bin/bash /scripts/keycloak-init.sh
-        echo "✅ Keycloak inicializado com sucesso!"
+        echo "✅ Keycloak initialized successfully!"
     restart: no
     logging:
       driver: "json-file"
@@ -430,7 +430,7 @@ services:
         max-size: "5m"
         max-file: "2"
 
-  # Kong-Init - Configurar Kong com Keycloak OIDC
+  # Kong-Init - Configure Kong with Keycloak OIDC
   kong-init:
     image: alpine:3.21
     container_name: fincontrol-kong-init
@@ -448,11 +448,11 @@ services:
       - -c
       - |
         set -e
-        echo "📦 Instalando dependências..."
+        echo "📦 Installing dependencies..."
         apk add --no-cache bash curl
-        echo "🔗 Configurando Kong com Keycloak..."
+        echo "🔗 Configuring Kong with Keycloak..."
         /bin/bash /scripts/kong-init.sh
-        echo "✅ Kong OIDC configurado com sucesso!"
+        echo "✅ Kong OIDC configured successfully!"
     restart: no
     logging:
       driver: "json-file"

@@ -1,107 +1,107 @@
-# Refresh Token — Fluxo e Responsabilidades
+# Refresh Token — Flow and Responsibilities
 
-> **Objetivo:** Documentar o ciclo de vida dos tokens JWT no FinControl, onde o refresh_token deve ser tratado e como implementar o fluxo correto nos clientes.
-> **Audiência:** Desenvolvedores de frontend, mobile e integradores de API
+> **Objective:** Document the JWT token lifecycle in FinControl, where refresh_token should be handled and how to implement the correct flow in clients.
+> **Audience:** Frontend, mobile and API integration developers
 
 ---
 
-## Decisão Arquitetural
+## Architectural Decision
 
-O Kong usa o plugin **`jwt` (built-in)**, que é **stateless**: valida assinatura RS256, issuer e lifetime do `access_token`, mas **não realiza refresh automático**. Isso é intencional e alinhado com o padrão OAuth 2.0/OIDC:
+Kong uses the **`jwt` (built-in)** plugin, which is **stateless**: it validates RS256 signature, issuer and lifetime of the `access_token`, but **does not perform automatic refresh**. This is intentional and aligned with OAuth 2.0/OIDC standard:
 
-| Camada | Responsabilidade |
+| Layer | Responsibility |
 |--------|-----------------|
-| **Keycloak** | Emite `access_token` + `refresh_token`; renova tokens via `/token` |
-| **Kong** | Valida `access_token`; retorna `401` se expirado |
-| **APIs .NET** | Revalidam JWT (defense-in-depth); nunca veem o `refresh_token` |
-| **Cliente** | Detecta `401`, usa `refresh_token` para obter novo `access_token` |
+| **Keycloak** | Issues `access_token` + `refresh_token`; renews tokens via `/token` |
+| **Kong** | Validates `access_token`; returns `401` if expired |
+| **.NET APIs** | Revalidate JWT (defense-in-depth); never see `refresh_token` |
+| **Client** | Detects `401`, uses `refresh_token` to obtain new `access_token` |
 
-O `refresh_token` **nunca transita pelo Kong nem pelas APIs** — é um segredo exclusivo entre o cliente e o Keycloak.
+The `refresh_token` **never transits through Kong or APIs** — it is an exclusive secret between the client and Keycloak.
 
 ---
 
-## Tempos de Vida Configurados
+## Configured Lifetimes
 
-Configurados no realm `fincontrol` via [keycloak-init.sh](../docker-init/keycloak/keycloak-init.sh):
+Configured in `fincontrol` realm via [keycloak-init.sh](../docker-init/keycloak/keycloak-init.sh):
 
-| Parâmetro | Valor | Significado |
+| Parameter | Value | Meaning |
 |-----------|-------|-------------|
-| `accessTokenLifespan` | **300s (5 min)** | Validade do `access_token` enviado ao Kong |
-| `ssoSessionIdleTimeout` | **1800s (30 min)** | `refresh_token` expira se inativo por 30 min |
-| `ssoSessionMaxLifespan` | **36000s (10 h)** | Sessão total máxima; após isso, novo login obrigatório |
-| `refreshTokenMaxReuse` | **0** | Cada `refresh_token` é válido para **um único uso** (rotação automática) |
+| `accessTokenLifespan` | **300s (5 min)** | Validity of `access_token` sent to Kong |
+| `ssoSessionIdleTimeout` | **1800s (30 min)** | `refresh_token` expires if inactive for 30 min |
+| `ssoSessionMaxLifespan` | **36000s (10 h)** | Maximum total session; after this, new login required |
+| `refreshTokenMaxReuse` | **0** | Each `refresh_token` is valid for **a single use** (automatic rotation) |
 
-> **Atenção:** `refreshTokenMaxReuse: 0` significa que ao usar o `refresh_token`, o Keycloak o invalida e retorna um **novo** `refresh_token`. O cliente deve sempre armazenar o token mais recente.
+> **Warning:** `refreshTokenMaxReuse: 0` means that when using the `refresh_token`, Keycloak invalidates it and returns a **new** `refresh_token`. The client must always store the most recent token.
 
 ---
 
-## Fluxo Completo
+## Complete Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  1. LOGIN INICIAL                                                    │
+│  1. INITIAL LOGIN                                                    │
 │                                                                     │
-│  Cliente ──POST /token──► Keycloak                                  │
-│           grant_type=password (ou authorization_code + PKCE)        │
+│  Client ──POST /token──► Keycloak                                  │
+│          grant_type=password (or authorization_code + PKCE)        │
 │                                                                     │
-│  Keycloak ◄── access_token  (válido 5 min)                          │
-│           ◄── refresh_token (válido 30 min idle / 10h máx)          │
+│  Keycloak ◄── access_token  (valid 5 min)                          │
+│           ◄── refresh_token (valid 30 min idle / 10h max)          │
 │           ◄── expires_in: 300                                       │
 └─────────────────────────────────────────────────────────────────────┘
                           │
-                          │ armazena ambos os tokens
+                          │ store both tokens
                           ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  2. REQUISIÇÃO NORMAL (token válido)                                 │
+│  2. NORMAL REQUEST (valid token)                                    │
 │                                                                     │
-│  Cliente ──GET /consolidados──► Kong                                │
-│           Authorization: Bearer <access_token>                       │
+│  Client ──GET /consolidados──► Kong                                │
+│          Authorization: Bearer <access_token>                       │
 │                                                                     │
-│  Kong valida JWT ──► encaminha ao upstream                          │
-│  API retorna ◄── 200 OK                                             │
+│  Kong validates JWT ──► forwards upstream                          │
+│  API returns ◄── 200 OK                                             │
 └─────────────────────────────────────────────────────────────────────┘
                           │
-                          │ após ~5 min
+                          │ after ~5 min
                           ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  3. TOKEN EXPIRADO — REFRESH                                         │
+│  3. TOKEN EXPIRED — REFRESH                                         │
 │                                                                     │
-│  Cliente ──GET /consolidados──► Kong                                │
-│           Authorization: Bearer <access_token expirado>             │
+│  Client ──GET /consolidados──► Kong                                │
+│          Authorization: Bearer <expired access_token>              │
 │                                                                     │
 │  Kong ◄── 401 Unauthorized                                          │
-│           {"message":"Unauthorized"}                                │
+│          {"message":"Unauthorized"}                                │
 │                                                                     │
-│  Cliente detecta 401 ──POST /token──► Keycloak                      │
-│           grant_type=refresh_token                                  │
-│           refresh_token=<refresh_token atual>                        │
+│  Client detects 401 ──POST /token──► Keycloak                      │
+│          grant_type=refresh_token                                  │
+│          refresh_token=<current refresh_token>                      │
 │                                                                     │
-│  Keycloak ◄── novo access_token  (válido por mais 5 min)            │
-│           ◄── novo refresh_token  (o anterior foi invalidado)        │
+│  Keycloak ◄── new access_token  (valid for another 5 min)          │
+│           ◄── new refresh_token  (previous one was invalidated)     │
 │                                                                     │
-│  Cliente armazena os novos tokens                                   │
-│  Cliente ──GET /consolidados──► Kong  (retry com novo access_token) │
-│  API retorna ◄── 200 OK                                             │
+│  Client stores new tokens                                          │
+│  Client ──GET /consolidados──► Kong  (retry with new access_token) │
+│  API returns ◄── 200 OK                                             │
 └─────────────────────────────────────────────────────────────────────┘
                           │
-                          │ após 30 min idle ou 10h
+                          │ after 30 min idle or 10h
                           ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  4. REFRESH TOKEN EXPIRADO — NOVO LOGIN                              │
+│  4. REFRESH TOKEN EXPIRED — NEW LOGIN                               │
 │                                                                     │
-│  POST /token com refresh_token expirado                             │
+│  POST /token with expired refresh_token                            │
 │  Keycloak ◄── 400 Bad Request                                       │
 │           {"error":"invalid_grant","error_description":"..."}       │
 │                                                                     │
-│  Cliente redireciona usuário para novo login                        │
+│  Client redirects user to new login                                │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Obter Tokens (Login Inicial)
+## Get Tokens (Initial Login)
 
-### Cliente Frontend — `fincontrol-frontend` (público, PKCE)
+### Frontend Client — `fincontrol-frontend` (public, PKCE)
 
 **Bash:**
 ```bash
@@ -118,7 +118,7 @@ ACCESS_TOKEN=$(echo "$RESPONSE"  | jq -r '.access_token')
 REFRESH_TOKEN=$(echo "$RESPONSE" | jq -r '.refresh_token')
 EXPIRES_IN=$(echo "$RESPONSE"    | jq -r '.expires_in')
 
-echo "access_token expira em: ${EXPIRES_IN}s"
+echo "access_token expires in: ${EXPIRES_IN}s"
 ```
 
 **PowerShell:**
@@ -135,10 +135,10 @@ $response = Invoke-WebRequest `
 
 $ACCESS_TOKEN  = $response.access_token
 $REFRESH_TOKEN = $response.refresh_token
-Write-Host "Expira em: $($response.expires_in)s"
+Write-Host "Expires in: $($response.expires_in)s"
 ```
 
-### Cliente Backend / Serviço — `fincontrol-backend` (confidencial)
+### Backend / Service Client — `fincontrol-backend` (confidential)
 
 **Bash:**
 ```bash
@@ -158,9 +158,9 @@ REFRESH_TOKEN=$(echo "$RESPONSE" | jq -r '.refresh_token')
 
 ---
 
-## Renovar o Token (Refresh)
+## Renew Token (Refresh)
 
-### Frontend — `fincontrol-frontend` (sem client_secret)
+### Frontend — `fincontrol-frontend` (no client_secret)
 
 **Bash:**
 ```bash
@@ -174,7 +174,7 @@ RESPONSE=$(curl -s -X POST \
 NEW_ACCESS_TOKEN=$(echo "$RESPONSE"  | jq -r '.access_token')
 NEW_REFRESH_TOKEN=$(echo "$RESPONSE" | jq -r '.refresh_token')
 
-# Sempre substituir — o refresh_token anterior foi invalidado
+# Always replace — the previous refresh_token was invalidated
 ACCESS_TOKEN=$NEW_ACCESS_TOKEN
 REFRESH_TOKEN=$NEW_REFRESH_TOKEN
 ```
@@ -191,10 +191,10 @@ $response = Invoke-WebRequest `
   ConvertFrom-Json
 
 $ACCESS_TOKEN  = $response.access_token
-$REFRESH_TOKEN = $response.refresh_token   # Sempre salvar o novo
+$REFRESH_TOKEN = $response.refresh_token   # Always save the new one
 ```
 
-### Backend — `fincontrol-backend` (com client_secret)
+### Backend — `fincontrol-backend` (with client_secret)
 
 **Bash:**
 ```bash
@@ -212,34 +212,34 @@ NEW_REFRESH_TOKEN=$(echo "$RESPONSE" | jq -r '.refresh_token')
 
 ---
 
-## Detectar Quando Fazer Refresh
+## Detect When to Refresh
 
-Há duas estratégias, podendo ser combinadas:
+There are two strategies, which can be combined:
 
-### Estratégia 1 — Proativa (recomendada)
+### Strategy 1 — Proactive (recommended)
 
-Calcular o momento de expiração ao receber o token e renovar antes de expirar:
+Calculate the expiration moment when receiving the token and renew before expiring:
 
 ```bash
-# Guarda o instante de expiração (agora + expires_in - margem de 30s)
+# Store the expiration instant (now + expires_in - 30s margin)
 EXPIRES_AT=$(( $(date +%s) + EXPIRES_IN - 30 ))
 
-# Antes de cada requisição:
+# Before each request:
 if [ "$(date +%s)" -ge "$EXPIRES_AT" ]; then
-  # Renovar token antes de enviar a requisição
+  # Renew token before sending the request
   refresh_tokens
 fi
 ```
 
 ```csharp
-// Exemplo C# — verificar antes da requisição
+// Example C# — check before request
 if (DateTimeOffset.UtcNow >= _tokenExpiresAt.AddSeconds(-30))
     await RefreshTokenAsync(cancellationToken);
 ```
 
-### Estratégia 2 — Reativa (fallback)
+### Strategy 2 — Reactive (fallback)
 
-Interceptar o `401` do Kong e tentar refresh uma vez:
+Intercept Kong's `401` and try refresh once:
 
 ```bash
 HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" \
@@ -247,21 +247,21 @@ HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" \
   "http://localhost:8000/consolidados/saldo?data-lancamento=2026-05-22")
 
 if [ "$HTTP_STATUS" -eq "401" ]; then
-  echo "Token expirado — renovando..."
+  echo "Token expired — refreshing..."
   refresh_tokens
-  # Retry com novo token
+  # Retry with new token
   curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
     "http://localhost:8000/consolidados/saldo?data-lancamento=2026-05-22"
 fi
 ```
 
-> **Atenção:** A estratégia reativa isolada pode causar falha na primeira requisição após a expiração. Use a proativa como principal e a reativa como fallback de segurança.
+> **Warning:** The reactive strategy alone can cause failure on the first request after expiration. Use proactive as primary and reactive as safety fallback.
 
 ---
 
-## Verificar se o Refresh Token Está Válido
+## Check if Refresh Token is Valid
 
-Para checar se o `refresh_token` ainda é válido antes de usá-lo (verificação de sessão):
+To check if the `refresh_token` is still valid before using it (session verification):
 
 **Bash:**
 ```bash
@@ -274,7 +274,7 @@ curl -s -X POST \
   | jq '{active, exp}'
 ```
 
-Resultado esperado quando válido:
+Expected result when valid:
 ```json
 {
   "active": true,
@@ -282,7 +282,7 @@ Resultado esperado quando válido:
 }
 ```
 
-Quando inválido ou expirado:
+When invalid or expired:
 ```json
 {
   "active": false
@@ -291,9 +291,9 @@ Quando inválido ou expirado:
 
 ---
 
-## Logout (Invalidar Refresh Token)
+## Logout (Invalidate Refresh Token)
 
-Para invalidar a sessão e o `refresh_token` ativo:
+To invalidate the session and active `refresh_token`:
 
 **Bash:**
 ```bash
@@ -302,37 +302,37 @@ curl -s -X POST \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "client_id=fincontrol-frontend" \
   -d "refresh_token=${REFRESH_TOKEN}"
-# Esperado: HTTP 204 No Content
+# Expected: HTTP 204 No Content
 ```
 
 ---
 
-## Rotação de Refresh Tokens
+## Refresh Token Rotation
 
-Com `refreshTokenMaxReuse: 0` configurado no realm, o Keycloak aplica **rotação automática de refresh tokens**:
+With `refreshTokenMaxReuse: 0` configured in the realm, Keycloak applies **automatic refresh token rotation**:
 
 ```
 Login
-  └─► refresh_token_A  (válido)
+  └─► refresh_token_A  (valid)
 
-Primeiro refresh com refresh_token_A
-  └─► refresh_token_A  (INVALIDADO)
-  └─► refresh_token_B  (novo, válido)
+First refresh with refresh_token_A
+  └─► refresh_token_A  (INVALIDATED)
+  └─► refresh_token_B  (new, valid)
 
-Segundo refresh com refresh_token_B
-  └─► refresh_token_B  (INVALIDADO)
-  └─► refresh_token_C  (novo, válido)
+Second refresh with refresh_token_B
+  └─► refresh_token_B  (INVALIDATED)
+  └─► refresh_token_C  (new, valid)
 
-Tentativa de reusar refresh_token_A (já invalidado)
+Attempt to reuse refresh_token_A (already invalidated)
   └─► 400 Bad Request {"error":"invalid_grant"}
-      → Keycloak invalida TODA a sessão (proteção contra roubo de token)
+      → Keycloak invalidates ENTIRE session (protection against token theft)
 ```
 
-> **Consequência importante:** Se um `refresh_token` for usado duas vezes (ex.: race condition em cliente multi-tab), o Keycloak invalida a sessão inteira. O cliente deve serializar as chamadas de refresh.
+> **Important consequence:** If a `refresh_token` is used twice (e.g., race condition in multi-tab client), Keycloak invalidates the entire session. The client must serialize refresh calls.
 
 ---
 
-## Pseudocódigo — Implementação no Cliente
+## Pseudocode — Client Implementation
 
 ```
 TokenManager:
@@ -347,7 +347,7 @@ TokenManager:
   store(response):
     accessToken  = response.access_token
     refreshToken = response.refresh_token
-    expiresAt    = now() + response.expires_in - 30s  // margem de 30s
+    expiresAt    = now() + response.expires_in - 30s  // 30s margin
 
   isExpired():
     return now() >= expiresAt
@@ -355,20 +355,20 @@ TokenManager:
   refresh():
     response = POST /token (grant_type=refresh_token, refresh_token=refreshToken)
     if response.error == "invalid_grant":
-      triggerReLogin()   // sessão expirada — novo login obrigatório
+      triggerReLogin()   // session expired — new login required
     else:
       store(response)
 
   getAccessToken():
     if isExpired():
-      refresh()          // proativo
+      refresh()          // proactive
     return accessToken
 
   request(url, method):
     token = getAccessToken()
     response = HTTP(url, Authorization: Bearer token)
     if response.status == 401:
-      refresh()          // reativo (fallback)
+      refresh()          // reactive (fallback)
       token = getAccessToken()
       response = HTTP(url, Authorization: Bearer token)
     return response
@@ -378,46 +378,46 @@ TokenManager:
 
 ## Troubleshooting
 
-| Problema | Causa provável | Solução |
+| Issue | Likely cause | Solution |
 |----------|---------------|---------|
-| `{"error":"invalid_grant"}` no refresh | `refresh_token` expirado ou já usado | Redirecionar para novo login |
-| `{"error":"invalid_grant"}` inesperado | Race condition — token usado duas vezes | Serializar chamadas de refresh; armazenar o mais recente |
-| Kong retorna `401` com token recém-renovado | `ClockSkew` — descompasso de relógio entre servidores | As APIs toleram 30s de skew (`ClockSkew = TimeSpan.FromSeconds(30)`) |
-| `{"message":"Unauthorized"}` do Kong | `access_token` expirado ou malformado | Verificar `exp` do token em [jwt.io](https://jwt.io); fazer refresh |
-| Refresh retorna `400` em cliente confidencial | `client_secret` ausente ou incorreto | Incluir `client_secret` no body do request de refresh |
-| `{"error":"unauthorized_client"}` | `grant_type=refresh_token` não permitido para o client | Verificar `standardFlowEnabled: true` no client do Keycloak |
+| `{"error":"invalid_grant"}` on refresh | `refresh_token` expired or already used | Redirect to new login |
+| `{"error":"invalid_grant"}` unexpected | Race condition — token used twice | Serialize refresh calls; store most recent |
+| Kong returns `401` with freshly renewed token | `ClockSkew` — clock mismatch between servers | APIs tolerate 30s skew (`ClockSkew = TimeSpan.FromSeconds(30)`) |
+| `{"message":"Unauthorized"}` from Kong | `access_token` expired or malformed | Check token `exp` at [jwt.io](https://jwt.io); refresh |
+| Refresh returns `400` in confidential client | `client_secret` missing or incorrect | Include `client_secret` in refresh request body |
+| `{"error":"unauthorized_client"}` | `grant_type=refresh_token` not allowed for client | Check `standardFlowEnabled: true` in Keycloak client |
 
 ---
 
-## Resumo dos Endpoints Keycloak
+## Summary of Keycloak Endpoints
 
-Todos os endpoints de token estão disponíveis via OIDC Discovery:
+All token endpoints are available via OIDC Discovery:
 
 ```bash
 curl -s http://localhost:8081/realms/fincontrol/.well-known/openid-configuration \
   | jq '{token_endpoint, end_session_endpoint, introspection_endpoint}'
 ```
 
-| Operação | Método | Endpoint |
+| Operation | Method | Endpoint |
 |----------|--------|----------|
-| Login / Obter token | POST | `http://localhost:8081/realms/fincontrol/protocol/openid-connect/token` |
+| Login / Get token | POST | `http://localhost:8081/realms/fincontrol/protocol/openid-connect/token` |
 | Refresh token | POST | `http://localhost:8081/realms/fincontrol/protocol/openid-connect/token` |
 | Logout | POST | `http://localhost:8081/realms/fincontrol/protocol/openid-connect/logout` |
-| Introspecção | POST | `http://localhost:8081/realms/fincontrol/protocol/openid-connect/token/introspect` |
-| JWKS (chave pública) | GET | `http://localhost:8081/realms/fincontrol/protocol/openid-connect/certs` |
+| Introspection | POST | `http://localhost:8081/realms/fincontrol/protocol/openid-connect/token/introspect` |
+| JWKS (public key) | GET | `http://localhost:8081/realms/fincontrol/protocol/openid-connect/certs` |
 
 ---
 
-## Referências
+## References
 
-- [KONG_KEYCLOAK_OIDC.md](KONG_KEYCLOAK_OIDC.md) — configuração JWT no Kong
-- [KONG_KEYCLOAK_TESTS.md](KONG_KEYCLOAK_TESTS.md) — testes de integração
-- [KEYCLOAK_SETUP_GUIDE.md](KEYCLOAK_SETUP_GUIDE.md) — configuração do realm
+- [KONG_KEYCLOAK_OIDC.md](KONG_KEYCLOAK_OIDC.md) — JWT configuration in Kong
+- [KONG_KEYCLOAK_TESTS.md](KONG_KEYCLOAK_TESTS.md) — integration tests
+- [KEYCLOAK_SETUP_GUIDE.md](KEYCLOAK_SETUP_GUIDE.md) — realm configuration
 - [RFC 6749 — OAuth 2.0](https://datatracker.ietf.org/doc/html/rfc6749#section-6) — Refresh Token Grant
 - [Keycloak — Session and Token Timeouts](https://www.keycloak.org/docs/latest/server_admin/#_timeouts)
 
 ---
 
-**Versão:** 1.0
-**Última atualização:** Maio 2026
-**Status:** Ativo
+**Version:** 1.0
+**Last updated:** May 2026
+**Status:** Active
