@@ -100,7 +100,7 @@ public class UpdateConsolidatedBalanceCommandHandlerTests
     [Fact]
     public async Task Should_Accumulate_Over_Existing_Balance()
     {
-        var (handler, cacheMock) = CreateHandler(ConsolidatedBalanceFaker.Positive(10000));
+        var (handler, cacheMock) = CreateHandler(ConsolidatedBalanceFaker.Positivo(10000));
 
         byte[]? savedBytes = null;
         cacheMock.Setup(c => c.SetAsync(
@@ -118,7 +118,7 @@ public class UpdateConsolidatedBalanceCommandHandlerTests
     [Fact]
     public async Task Should_Decrement_Balance_For_Negative_Transaction()
     {
-        var (handler, cacheMock) = CreateHandler(ConsolidatedBalanceFaker.Positive(10000));
+        var (handler, cacheMock) = CreateHandler(ConsolidatedBalanceFaker.Positivo(10000));
 
         byte[]? savedBytes = null;
         cacheMock.Setup(c => c.SetAsync(
@@ -136,7 +136,7 @@ public class UpdateConsolidatedBalanceCommandHandlerTests
     [Fact]
     public async Task Balance_Can_Go_Negative_When_Debits_Exceed_Credits()
     {
-        var (handler, cacheMock) = CreateHandler(ConsolidatedBalanceFaker.Positive(1000));
+        var (handler, cacheMock) = CreateHandler(ConsolidatedBalanceFaker.Positivo(1000));
 
         byte[]? savedBytes = null;
         cacheMock.Setup(c => c.SetAsync(
@@ -223,7 +223,7 @@ public class UpdateConsolidatedBalanceCommandHandlerTests
     [Fact]
     public async Task Should_Update_LastUpdated_To_Now()
     {
-        var (handler, cacheMock) = CreateHandler(ConsolidatedBalanceFaker.Positive(1000));
+        var (handler, cacheMock) = CreateHandler(ConsolidatedBalanceFaker.Positivo(1000));
 
         byte[]? savedBytes = null;
         cacheMock.Setup(c => c.SetAsync(

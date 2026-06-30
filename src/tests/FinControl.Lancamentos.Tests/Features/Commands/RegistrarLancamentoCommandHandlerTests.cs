@@ -31,7 +31,7 @@ public class RegisterTransactionCommandHandlerTests
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        await handler.Handle(TransactionCommandFaker.ValidSale(1500));
+        await handler.Handle(TransactionCommandFaker.ValidVenda(1500));
 
         db.Transactions.Should().HaveCount(1);
     }
@@ -42,7 +42,7 @@ public class RegisterTransactionCommandHandlerTests
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        var response = await handler.Handle(TransactionCommandFaker.ValidSale());
+        var response = await handler.Handle(TransactionCommandFaker.ValidVenda());
 
         response.NavigationId.Should().NotBe(Guid.Empty);
     }
@@ -54,7 +54,7 @@ public class RegisterTransactionCommandHandlerTests
         var handler = CreateHandler(db);
         var before = DateTimeOffset.UtcNow;
 
-        var response = await handler.Handle(TransactionCommandFaker.ValidSale());
+        var response = await handler.Handle(TransactionCommandFaker.ValidVenda());
 
         response.CreatedAt.Should().BeOnOrAfter(before);
     }
@@ -82,7 +82,7 @@ public class RegisterTransactionCommandHandlerTests
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
-        var command = TransactionCommandFaker.ValidSale() with { TransactionDate = default };
+        var command = TransactionCommandFaker.ValidVenda() with { TransactionDate = default };
         var before = DateTimeOffset.UtcNow;
 
         await handler.Handle(command);
@@ -97,7 +97,7 @@ public class RegisterTransactionCommandHandlerTests
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
         var expectedDate = DateTimeOffset.UtcNow.AddDays(-5);
-        var command = TransactionCommandFaker.ValidSale() with { TransactionDate = expectedDate };
+        var command = TransactionCommandFaker.ValidVenda() with { TransactionDate = expectedDate };
 
         await handler.Handle(command);
 
@@ -113,7 +113,7 @@ public class RegisterTransactionCommandHandlerTests
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        await handler.Handle(TransactionCommandFaker.ValidSale(1000));
+        await handler.Handle(TransactionCommandFaker.ValidVenda(1000));
 
         db.OutboxMessages.Should().HaveCount(1);
     }
@@ -124,7 +124,7 @@ public class RegisterTransactionCommandHandlerTests
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        await handler.Handle(TransactionCommandFaker.ValidSale(1000));
+        await handler.Handle(TransactionCommandFaker.ValidVenda(1000));
 
         var msg = db.OutboxMessages.Single();
         msg.Exchange.Should().Be("transactions.events");
@@ -137,7 +137,7 @@ public class RegisterTransactionCommandHandlerTests
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
-        var command = TransactionCommandFaker.ValidSale(3333);
+        var command = TransactionCommandFaker.ValidVenda(3333);
 
         await handler.Handle(command);
 
@@ -151,7 +151,7 @@ public class RegisterTransactionCommandHandlerTests
     {
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
-        var command = TransactionCommandFaker.ValidSale();
+        var command = TransactionCommandFaker.ValidVenda();
 
         await handler.Handle(command);
 
@@ -166,7 +166,7 @@ public class RegisterTransactionCommandHandlerTests
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        await handler.Handle(TransactionCommandFaker.ValidSale());
+        await handler.Handle(TransactionCommandFaker.ValidVenda());
 
         db.OutboxMessages.Single().DeliveredAt.Should().BeNull();
     }
@@ -179,9 +179,9 @@ public class RegisterTransactionCommandHandlerTests
         await using var db = CreateDbContext();
         var handler = CreateHandler(db);
 
-        await handler.Handle(TransactionCommandFaker.ValidSale(1000));
-        await handler.Handle(TransactionCommandFaker.ValidDebit(TransactionCategory.Return, -500));
-        await handler.Handle(TransactionCommandFaker.ValidSale(2500));
+        await handler.Handle(TransactionCommandFaker.ValidVenda(1000));
+        await handler.Handle(TransactionCommandFaker.ValidDebito(TransactionCategory.Return, -500));
+        await handler.Handle(TransactionCommandFaker.ValidVenda(2500));
 
         db.Transactions.Should().HaveCount(3);
         db.OutboxMessages.Should().HaveCount(3);

@@ -36,7 +36,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Pass_For_Others_With_Description()
     {
-        var result = _validator.Validate(TransactionCommandFaker.ValidOthers("Ad hoc service payment"));
+        var result = _validator.Validate(TransactionCommandFaker.ValidOutros("Ad hoc service payment"));
 
         result.IsValid.Should().BeTrue();
     }
@@ -46,7 +46,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_Category_Invalid()
     {
-        var command = TransactionCommandFaker.ValidSale() with { Category = (TransactionCategory)99 };
+        var command = TransactionCommandFaker.ValidVenda() with { Category = (TransactionCategory)99 };
 
         var result = _validator.Validate(command);
 
@@ -59,7 +59,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_Amount_Exceeds_Maximum()
     {
-        var command = TransactionCommandFaker.ValidSale() with { Amount = 100_000_000_000_000L };
+        var command = TransactionCommandFaker.ValidVenda() with { Amount = 100_000_000_000_000L };
 
         var result = _validator.Validate(command);
 
@@ -100,7 +100,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_Others_Category_Without_Description()
     {
-        var command = TransactionCommandFaker.Build(TransactionCategory.Others, 500, description: null)
+        var command = TransactionCommandFaker.Build(TransactionCategory.Others, 500, descricao: null)
             with { Description = null };
 
         var result = _validator.Validate(command);
@@ -112,7 +112,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_Description_Exceeds_500_Characters()
     {
-        var command = TransactionCommandFaker.ValidSale() with { Description = new string('x', 501) };
+        var command = TransactionCommandFaker.ValidVenda() with { Description = new string('x', 501) };
 
         var result = _validator.Validate(command);
 
@@ -125,7 +125,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_TransactionDate_More_Than_1_Day_In_Future()
     {
-        var command = TransactionCommandFaker.ValidSale() with
+        var command = TransactionCommandFaker.ValidVenda() with
         {
             TransactionDate = DateTimeOffset.UtcNow.AddDays(2)
         };
@@ -139,7 +139,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_TransactionDate_More_Than_One_Year_Ago()
     {
-        var command = TransactionCommandFaker.ValidSale() with
+        var command = TransactionCommandFaker.ValidVenda() with
         {
             TransactionDate = DateTimeOffset.UtcNow.AddYears(-2)
         };
@@ -155,7 +155,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_UserId_Empty()
     {
-        var command = TransactionCommandFaker.ValidSale() with { UserId = string.Empty };
+        var command = TransactionCommandFaker.ValidVenda() with { UserId = string.Empty };
 
         var result = _validator.Validate(command);
 
@@ -166,7 +166,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_UserId_Not_36_Characters()
     {
-        var command = TransactionCommandFaker.ValidSale() with { UserId = "short-user" };
+        var command = TransactionCommandFaker.ValidVenda() with { UserId = "short-user" };
 
         var result = _validator.Validate(command);
 
@@ -177,7 +177,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_UserName_Empty()
     {
-        var command = TransactionCommandFaker.ValidSale() with { UserName = string.Empty };
+        var command = TransactionCommandFaker.ValidVenda() with { UserName = string.Empty };
 
         var result = _validator.Validate(command);
 
@@ -188,7 +188,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_UserName_Exceeds_200_Characters()
     {
-        var command = TransactionCommandFaker.ValidSale() with { UserName = new string('a', 201) };
+        var command = TransactionCommandFaker.ValidVenda() with { UserName = new string('a', 201) };
 
         var result = _validator.Validate(command);
 
@@ -201,7 +201,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_Email_Invalid()
     {
-        var command = TransactionCommandFaker.ValidSale() with { UserEmail = "not-an-email" };
+        var command = TransactionCommandFaker.ValidVenda() with { UserEmail = "not-an-email" };
 
         var result = _validator.Validate(command);
 
@@ -212,7 +212,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_Email_Empty()
     {
-        var command = TransactionCommandFaker.ValidSale() with { UserEmail = string.Empty };
+        var command = TransactionCommandFaker.ValidVenda() with { UserEmail = string.Empty };
 
         var result = _validator.Validate(command);
 
@@ -225,7 +225,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_IdempotencyKey_Is_Empty_Guid()
     {
-        var command = TransactionCommandFaker.ValidSale() with { IdempotencyKey = Guid.Empty };
+        var command = TransactionCommandFaker.ValidVenda() with { IdempotencyKey = Guid.Empty };
 
         var result = _validator.Validate(command);
 
@@ -236,7 +236,7 @@ public class RegisterTransactionCommandValidatorTests
     [Fact]
     public void Should_Fail_When_CorrelationId_Is_Empty_Guid()
     {
-        var command = TransactionCommandFaker.ValidSale() with { CorrelationId = Guid.Empty };
+        var command = TransactionCommandFaker.ValidVenda() with { CorrelationId = Guid.Empty };
 
         var result = _validator.Validate(command);
 

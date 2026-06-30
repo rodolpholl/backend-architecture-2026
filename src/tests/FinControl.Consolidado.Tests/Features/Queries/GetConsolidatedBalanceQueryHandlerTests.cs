@@ -49,7 +49,7 @@ public class GetConsolidatedBalanceQueryHandlerTests
     [Fact]
     public async Task Should_Return_Accumulated_Balance_When_Cache_Contains_Data()
     {
-        var balance = ConsolidatedBalanceFaker.Positive(15000);
+        var balance = ConsolidatedBalanceFaker.Positivo(15000);
         var cacheMock = MockWithKey("balance:consolidated:accumulated", balance);
 
         var response = await CreateHandler(cacheMock)
@@ -87,7 +87,7 @@ public class GetConsolidatedBalanceQueryHandlerTests
     public async Task Should_Return_Balance_Of_Date_When_Exists_In_Cache()
     {
         var date = new DateOnly(2026, 5, 23);
-        var balance = ConsolidatedBalanceFaker.Positive(8500);
+        var balance = ConsolidatedBalanceFaker.Positivo(8500);
         var cacheMock = MockWithKey("balance:consolidated:2026-05-23", balance);
 
         var response = await CreateHandler(cacheMock)
@@ -116,7 +116,7 @@ public class GetConsolidatedBalanceQueryHandlerTests
     public async Task Should_Search_Previous_Day_When_Date_Not_Found_In_Cache()
     {
         var date = new DateOnly(2026, 5, 23);
-        var balanceYesterday = ConsolidatedBalanceFaker.Positive(5000);
+        var balanceYesterday = ConsolidatedBalanceFaker.Positivo(5000);
         var cacheMock = MockWithKey("balance:consolidated:2026-05-22", balanceYesterday);
 
         var response = await CreateHandler(cacheMock)
@@ -130,7 +130,7 @@ public class GetConsolidatedBalanceQueryHandlerTests
     {
         // Data available 3 days ago, but not 1 or 2 days ago
         var date = new DateOnly(2026, 5, 23);
-        var balance3DaysAgo = ConsolidatedBalanceFaker.Positive(12000);
+        var balance3DaysAgo = ConsolidatedBalanceFaker.Positivo(12000);
         var cacheMock = MockWithKey("balance:consolidated:2026-05-20", balance3DaysAgo);
 
         var response = await CreateHandler(cacheMock)
@@ -143,7 +143,7 @@ public class GetConsolidatedBalanceQueryHandlerTests
     public async Task Should_Propagate_Found_Balance_To_Requested_Date()
     {
         var date = new DateOnly(2026, 5, 23);
-        var balanceYesterday = ConsolidatedBalanceFaker.Positive(7000);
+        var balanceYesterday = ConsolidatedBalanceFaker.Positivo(7000);
         var cacheMock = MockWithKey("balance:consolidated:2026-05-22", balanceYesterday);
 
         cacheMock.Setup(c => c.SetAsync(
@@ -166,7 +166,7 @@ public class GetConsolidatedBalanceQueryHandlerTests
     public async Task Should_Propagate_With_TTL_Of_30_Days()
     {
         var date = new DateOnly(2026, 5, 23);
-        var balanceYesterday = ConsolidatedBalanceFaker.Positive(7000);
+        var balanceYesterday = ConsolidatedBalanceFaker.Positivo(7000);
         var cacheMock = MockWithKey("balance:consolidated:2026-05-22", balanceYesterday);
 
         DistributedCacheEntryOptions? capturedOpts = null;
@@ -204,7 +204,7 @@ public class GetConsolidatedBalanceQueryHandlerTests
     {
         // Data available 1 day ago — should stop immediately, without trying remaining 29 days
         var date = new DateOnly(2026, 5, 23);
-        var balanceYesterday = ConsolidatedBalanceFaker.Positive(3000);
+        var balanceYesterday = ConsolidatedBalanceFaker.Positivo(3000);
         var cacheMock = MockWithKey("balance:consolidated:2026-05-22", balanceYesterday);
 
         cacheMock.Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(),
@@ -249,7 +249,7 @@ public class GetConsolidatedBalanceQueryHandlerTests
     [Fact]
     public async Task Should_Return_Negative_Balance_When_Debits_Exceed_Credits()
     {
-        var balance = ConsolidatedBalanceFaker.Negative(-5000);
+        var balance = ConsolidatedBalanceFaker.Negativo(-5000);
         var cacheMock = MockWithKey("balance:consolidated:accumulated", balance);
 
         var response = await CreateHandler(cacheMock)
