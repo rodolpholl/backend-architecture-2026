@@ -1,4 +1,4 @@
-# Kong + Keycloak — Integration Tests
+﻿# Kong + Keycloak — Integration Tests
 
 > **Objective:** Verify that Kong is properly protecting APIs via JWT RS256 + rate-limiting.
 > **Audience:** Developers and SREs
@@ -30,8 +30,8 @@ curl -s http://localhost:8001/services | jq '.data[] | {name, url}'
 
 **Expected result:**
 ```
-fincontrol-lancamentos  →  http://host.docker.internal:5083
-fincontrol-consolidados →  http://host.docker.internal:5260
+fincontrol-Entries  →  http://host.docker.internal:5083
+fincontrol-Consolidations →  http://host.docker.internal:5260
 ```
 
 PASS → Services with correct URLs (`5083` / `5260`)
@@ -96,7 +96,7 @@ FAIL → Check credentials in [KEYCLOAK_SETUP_GUIDE.md](KEYCLOAK_SETUP_GUIDE.md)
 **Bash:**
 ```bash
 curl -s -o /dev/null -w "%{http_code}" \
-  http://localhost:8000/lancamentos/health
+  http://localhost:8000/Entries/health
 # Expected: 401
 ```
 
@@ -111,7 +111,7 @@ FAIL → `jwt` plugin not active — see Test 2
 
 **PowerShell:**
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:8000/lancamentos/health" `
+$response = Invoke-WebRequest -Uri "http://localhost:8000/Entries/health" `
     -Headers @{"Authorization" = "Bearer $TOKEN"}
 Write-Host "Status: $($response.StatusCode)"
 ```
@@ -120,7 +120,7 @@ Write-Host "Status: $($response.StatusCode)"
 ```bash
 curl -s -o /dev/null -w "%{http_code}" \
   -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8000/lancamentos/health
+  http://localhost:8000/Entries/health
 # Expected: 200
 ```
 
@@ -135,7 +135,7 @@ FAIL → Check token and `jwt` plugin configuration in Kong
 ```bash
 curl -s -o /dev/null -w "%{http_code}" \
   -H "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.invalid.invalid" \
-  http://localhost:8000/lancamentos/health
+  http://localhost:8000/Entries/health
 # Expected: 401
 ```
 
@@ -187,7 +187,7 @@ curl -s http://localhost:8081/realms/fincontrol/.well-known/openid-configuration
 
 ---
 
-## Test 9: Rate Limiting (Consolidado — 55 req/s)
+## Test 9: Rate Limiting (Consolidation — 55 req/s)
 
 **Objective:** Confirm that rate limiting is active in response headers.
 
@@ -195,7 +195,7 @@ curl -s http://localhost:8081/realms/fincontrol/.well-known/openid-configuration
 ```bash
 curl -s -I \
   -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/consolidados/saldo?data-lancamento=2026-05-23" \
+  "http://localhost:8000/Consolidations/saldo?data-lancamento=2026-05-23" \
   | grep -i "ratelimit"
 # Expected: X-RateLimit-Limit-Second: 55
 ```
@@ -239,3 +239,4 @@ Date: [DATE]
 **Version:** 3.0
 **Last updated:** May 2026
 **Status:** Active
+

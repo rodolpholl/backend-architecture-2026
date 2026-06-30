@@ -1,4 +1,4 @@
-# Docker Compose - FinControl Backend
+﻿# Docker Compose - FinControl Backend
 
 Complete infrastructure for local development with PostgreSQL, Redis, RabbitMQ, Vault, Keycloak, Kong, Jaeger, Prometheus and Grafana.
 
@@ -51,14 +51,14 @@ Infrastructure containers should be `healthy`. Init containers (`vault-init`, `k
 With infrastructure running, start .NET projects (migrations applied automatically on startup):
 
 ```bash
-# Lancamentos API
-dotnet run --project src/Modules/Lancamentos/FinControl.Lancamentos.API
+# Entries API
+dotnet run --project src/Modules/Entries/FinControl.Entries.API
 
-# Consolidados Worker
-dotnet run --project src/Modules/Consolidados/FinControl.Consolidado.Worker
+# Consolidations Worker
+dotnet run --project src/Modules/Consolidations/FinControl.Consolidation.Worker
 
-# Consolidados API
-dotnet run --project src/Modules/Consolidados/FinControl.Consolidado.API
+# Consolidations API
+dotnet run --project src/Modules/Consolidations/FinControl.Consolidation.API
 ```
 
 Each API applies pending migrations automatically on startup. If Vault is unavailable, the API fails with an explicit error.
@@ -90,7 +90,7 @@ docker-compose restart kong
 ## Connection Strings
 
 ```
-PostgreSQL:  Host=localhost;Port=5432;Database=fincontrol_lancamentos;Username=fincontrol_admin;Password=fincontrol_dev_password_123
+PostgreSQL:  Host=localhost;Port=5432;Database=fincontrol_Entries;Username=fincontrol_admin;Password=fincontrol_dev_password_123
 Redis:       localhost:6379,password=fincontrol_redis_password_123,abortConnect=false
 RabbitMQ:   amqp://fincontrol_user:fincontrol_rabbitmq_password_123@localhost:5672/%2Ffincontrol
 Vault:       http://localhost:8200
@@ -128,7 +128,7 @@ See [INIT-CONTAINERS-CLEANUP.md](INIT-CONTAINERS-CLEANUP.md) for details on init
 ```
 docker-init/
 ├── postgres/
-│   └── init-databases.sql        (creates databases: fincontrol_lancamentos, keycloak, kong)
+│   └── init-databases.sql        (creates databases: fincontrol_Entries, keycloak, kong)
 ├── rabbitmq/
 │   ├── rabbitmq.conf
 │   └── definitions.json
@@ -185,3 +185,4 @@ Confirm that `vault-init` completed with exit 0 before starting APIs.
 **Version:** 2.0
 **Last updated:** May 2026
 **Status:** Active
+

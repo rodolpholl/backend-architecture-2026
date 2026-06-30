@@ -1,4 +1,4 @@
-# Vault Initialization Flow
+﻿# Vault Initialization Flow
 
 ## Overview
 
@@ -23,7 +23,7 @@ Then, `keycloak-init` waits for `vault-init` to complete before configuring Keyc
 | `secret/dev/rabbitmq` | `uri`, username, password, vhost, host, port | .NET APIs via `VaultKeys.RabbitMqUri` |
 | `secret/dev/grafana` | `loki_url`, `otlp_endpoint`, `prometheus_pushgateway` | .NET APIs via `VaultKeys.LokiUrl` etc. |
 | `secret/dev/keycloak` | `realm`, `url`, `issuer`, `jwks_uri`, `kong_client_id`, `kong_client_secret`, `api_client_id`, `api_client_secret` | .NET APIs via `VaultKeys.Keycloak*` |
-| `secret/dev/kong` | `lancamentos_subscription_key`, `consolidados_subscription_key` | .NET APIs via `VaultKeys.Kong*SubscriptionKey` |
+| `secret/dev/kong` | `Entries_subscription_key`, `Consolidations_subscription_key` | .NET APIs via `VaultKeys.Kong*SubscriptionKey` |
 | `secret/dev/vault` | `root_token` | Internal metadata |
 
 ### How keys are read in .NET
@@ -156,3 +156,4 @@ See [INIT-CONTAINERS-CLEANUP.md](INIT-CONTAINERS-CLEANUP.md) to remove init cont
 **Version:** 2.0
 **Last updated:** May 2026
 **Status:** Active
+

@@ -15,11 +15,11 @@
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **FinControl.Lancamentos.API** | ✅ Functional | `POST /lancamentos/registrar` + Wolverine handlers + Vault + JWT |
-| **FinControl.Lancamentos.Core** | ✅ Functional | CQRS via Wolverine, FluentValidation, EF Core, Manual Outbox |
-| **FinControl.Consolidado.API** | ✅ Functional | `GET /consolidados/saldo?data-lancamento=yyyy-MM-dd` via Redis |
-| **FinControl.Consolidado.Core** | ✅ Functional | Command + Query handlers via Wolverine |
-| **FinControl.Consolidado.Worker** | ✅ Functional | Direct RabbitMQ Consumer → updates Redis |
+| **FinControl.Entries.API** | ✅ Functional | `POST /Entries/registrar` + Wolverine handlers + Vault + JWT |
+| **FinControl.Entries.Core** | ✅ Functional | CQRS via Wolverine, FluentValidation, EF Core, Manual Outbox |
+| **FinControl.Consolidation.API** | ✅ Functional | `GET /Consolidations/saldo?data-lancamento=yyyy-MM-dd` via Redis |
+| **FinControl.Consolidation.Core** | ✅ Functional | Command + Query handlers via Wolverine |
+| **FinControl.Consolidation.Worker** | ✅ Functional | Direct RabbitMQ Consumer → updates Redis |
 | **FinControl.Infrastructure** | ✅ Functional | Cache, Lock, Vault, Middleware, Observability, RabbitMqPublisher |
 | **FinControl.SharedKernel** | ✅ Functional | Base entities, events, typed result |
 | **FinControl.Auth** | ✅ Functional | Keycloak integration (JWT Bearer) |
@@ -36,8 +36,8 @@
 | **Kong JWT (RS256 + Keycloak)** | ✅ Configured | Keycloak public key registered as JWT credential in Kong |
 | **Grafana Dashboard** | ✅ Provisioned | HTTP Dashboard provisioned via JSON (`fincontrol-http-v1`) |
 | **Prometheus /metrics** | ✅ Functional | `prometheus-net` exposes metrics at `/metrics` (both APIs) |
-| **Automated Tests** | ✅ 83 tests | 48 (Lancamentos) + 35 (Consolidado), zero failures |
-| **FinControl.StressTests** | ✅ Implemented | NBomber 5.5.0 — 50 req/s (Consolidado) + 10 req/s (Lancamentos) in parallel; JWT auto-fetch from Keycloak; HTML + Markdown reports |
+| **Automated Tests** | ✅ 83 tests | 48 (Entries) + 35 (Consolidation), zero failures |
+| **FinControl.StressTests** | ✅ Implemented | NBomber 5.5.0 — 50 req/s (Consolidation) + 10 req/s (Entries) in parallel; JWT auto-fetch from Keycloak; HTML + Markdown reports |
 
 ### Open Items (Roadmap)
 
@@ -104,8 +104,8 @@
 - ✅ Complete documentation in repository
 
 ### Non-Functional Requirements
-- **Resilience**: Lancamentos should remain available even if Consolidado goes down
-- **Performance**: Consolidado receives **50 requests/second**
+- **Resilience**: Entries should remain available even if Consolidation goes down
+- **Performance**: Consolidation receives **50 requests/second**
 - **Reliability**: Maximum **5% request loss**
 
 ---
@@ -242,16 +242,16 @@ Status: ✅ Redis ESSENTIAL to reach 50 req/s with <5% loss
 ```
 REQUISIÇÕES DISTRIBUÍDAS:
 
-Pico leitura: 50 req/s → Consolidado Service
+Pico leitura: 50 req/s → Consolidation Service
 Escrita: write-heavy (70% da complexidade operacional) → Lançamentos Service
 
-CONSOLIDADO SERVICE (leitura via cache):
+Consolidation SERVICE (leitura via cache):
 ├─ Cache HIT (99%+): ~49,5 req/s → Resposta Redis <5ms
 ├─ Cache MISS (< 1%): < 0,5 req/s → Consulta BD (cold start)
 ├─ Carga efetiva no serviço: BAIXA (quase tudo retorna do Redis)
 └─ CPU/Memória: mínimos — serviço age como proxy do Redis
 
-Distribuição entre N servidores Consolidado:
+Distribuição entre N servidores Consolidation:
 ┌─────────────────┬──────────────┬────────────────────────────┐
 │ Servidores      │ Req/s p/ srv │ Utilização                 │
 ├─────────────────┼──────────────┼────────────────────────────┤
@@ -259,7 +259,7 @@ Distribuição entre N servidores Consolidado:
 │ 2 servidores    │ 25 req/s     │ 15-20% (muito confortável) │
 └─────────────────┴──────────────┴────────────────────────────┘
 
-RECOMENDAÇÃO: 1 servidor de Consolidado (+ auto-scaling horizontal)
+RECOMENDAÇÃO: 1 servidor de Consolidation (+ auto-scaling horizontal)
 ├─ Com 99%+ de cache hit, 1 instância lida com 50 req/s com folga
 ├─ Failover: Redis replica (sem dependência de segunda instância)
 ├─ Health check a cada 10 segundos
@@ -292,8 +292,8 @@ Load Balancer (Nginx/HAProxy):
 ├─ Conexões simultâneas: 500-1000 (preparado para tudo)
 └─ Recomendação: 1 instância LB (ou HA pair passivo)
 
-Status: ✅ 1 × Consolidado + 2 × Lançamentos + 1 × LB = Solução write-optimized
-        ✅ Consolidado leve (99% cache) → escalamento horizontal sob demanda
+Status: ✅ 1 × Consolidation + 2 × Lançamentos + 1 × LB = Solução write-optimized
+        ✅ Consolidation leve (99% cache) → escalamento horizontal sob demanda
         ✅ Lançamentos robusto (2 instâncias ativo-ativo + Outbox)
 ```
 
@@ -316,14 +316,14 @@ ENTRIES — WRITE-HEAVY SYSTEM (critical operational bottleneck)
 
 **Timeline with CorrelationId:**
 ```
-POST /lancamentos
+POST /Entries
   ↓ [10ms] gera CorrelationId (UUID) + valida
 response: {Id, CorrelationId} + x-correlation-id header
   ↓ [25ms] PostgreSQL ACID insert + Outbox publish
 [RabbitMQ] evento com x-correlation-id header
   ↓ [async] roteamento para consumer
 [Consumer] processa com CorrelationId do header
-  ↓ [15ms] Redis atualiza consolidado:{data}
+  ↓ [15ms] Redis atualiza Consolidation:{data}
 [Observabilidade] OpenTelemetry rastreia TODA operação com 1 CorrelationId
 ```
 
@@ -331,7 +331,7 @@ IMPACTO DE CADA LANÇAMENTO NO SISTEMA:
 ├─ PostgreSQL: ACID write (Serializable) → connection impact
 ├─ Outbox: transactional publishing → no loss even with crash
 ├─ RabbitMQ: guaranteed delivery to consumer
-├─ Redis: invalidation/update of `consolidado:{data}` key
+├─ Redis: invalidation/update of `Consolidation:{data}` key
 └─ Consolidated GET: next request already returns updated balance
 
 IDEMPOTENCY AND CONCURRENCY (multiple point-of-sale terminals):
@@ -412,7 +412,7 @@ The `CorrelationId` is essential for observability in asynchronous operations vi
 
 **Pipeline with CorrelationId:**
 ```
-  POST /lancamentos
+  POST /Entries
     └─ [1] Gera CorrelationId (UUID)
          └─ [2] Valida + insere em PostgreSQL (armazena CorrelationId)
               └─ [3] Outbox publica evento com x-correlation-id header
@@ -560,7 +560,7 @@ Consistency between persisted data and cached data is guaranteed by **Write-Thro
 #### Complete Flow (Write → Cache → Read)
 
 ```
-POST /lancamentos
+POST /Entries
   ├─ 1. Validação de domínio (tipo, valor, data)
   ├─ 2. Verificação de idempotência (SELECT IdempotencyKey)
   ├─ 3. INSERT no PostgreSQL (transação ACID)
@@ -573,7 +573,7 @@ Outbox Publisher (background worker):
 RabbitMQ → Consumer (Consolidated Service):
   ├─ Receives EntryRegistered
   ├─ Recalculates affected day balance (sum credits - debits)
-  ├─ SET Redis: consolidado:{data} = {balance} EX 86400
+  ├─ SET Redis: Consolidation:{data} = {balance} EX 86400
   └─ ACK message (at-least-once delivery guarantee)
 
 GET /consolidated/{data}:
@@ -585,17 +585,17 @@ GET /consolidated/{data}:
 
 ```csharp
 // FinControl.Consolidated.Core/Features/Commands/UpdateConsolidatedBalance/
-public class AtualizarSaldoConsolidadoCommandHandler(
+public class AtualizarSaldoConsolidationCommandHandler(
     RedisCacheService cache,
     IRedisLockService lockService,
-    ILogger<AtualizarSaldoConsolidadoCommandHandler> logger)
+    ILogger<AtualizarSaldoConsolidationCommandHandler> logger)
 {
-    private const string CACHE_KEY_ACUMULADO = "saldo:consolidado:acumulado";
+    private const string CACHE_KEY_ACUMULADO = "saldo:Consolidation:acumulado";
 
-    private static string CacheKey(DateOnly data) => $"saldo:consolidado:{data:yyyy-MM-dd}";
-    private static string LockKey(DateOnly data)  => $"lock:saldo:consolidado:{data:yyyy-MM-dd}";
+    private static string CacheKey(DateOnly data) => $"saldo:Consolidation:{data:yyyy-MM-dd}";
+    private static string LockKey(DateOnly data)  => $"lock:saldo:Consolidation:{data:yyyy-MM-dd}";
 
-    public async Task Handle(AtualizarSaldoConsolidadoCommand command, CancellationToken ct = default)
+    public async Task Handle(AtualizarSaldoConsolidationCommand command, CancellationToken ct = default)
     {
         // Usa a data do lançamento — não a data atual — para consolidar no dia correto
         var data = DateOnly.FromDateTime(command.DataLancamento.UtcDateTime);
@@ -606,14 +606,14 @@ public class AtualizarSaldoConsolidadoCommandHandler(
             action: async () =>
             {
                 // Atualiza o saldo acumulado (corrido)
-                var acumulado = await cache.GetAsync<SaldoConsolidado>(CACHE_KEY_ACUMULADO, ct);
+                var acumulado = await cache.GetAsync<SaldoConsolidation>(CACHE_KEY_ACUMULADO, ct);
                 var valorAcumulado = (acumulado?.Saldo ?? 0) + command.ValorLancamento;
                 await cache.SetAsync(CACHE_KEY_ACUMULADO,
-                    new SaldoConsolidado(valorAcumulado, DateTimeOffset.UtcNow), null, ct);
+                    new SaldoConsolidation(valorAcumulado, DateTimeOffset.UtcNow), null, ct);
 
                 // Atualiza o saldo do dia específico
-                var atual = await cache.GetAsync<SaldoConsolidado>(key, ct);
-                var novoSaldo = new SaldoConsolidado(
+                var atual = await cache.GetAsync<SaldoConsolidation>(key, ct);
+                var novoSaldo = new SaldoConsolidation(
                     Saldo: valorAcumulado,
                     UltimaAtualizacao: DateTimeOffset.UtcNow);
                 await cache.SetAsync(key, novoSaldo, TimeSpan.FromDays(30), ct);
@@ -1167,52 +1167,52 @@ volumes:
 ```bash
 # 1️⃣ Create upstream (multiple Consolidated instances)
 curl -X POST http://localhost:8001/upstreams \
-  -d "name=consolidado_backend"
+  -d "name=Consolidation_backend"
 
 # 2️⃣ Add targets (2 Consolidated servers)
-curl -X POST http://localhost:8001/upstreams/consolidado_backend/targets \
-  -d "target=consolidado-1.example.com:5000" \
+curl -X POST http://localhost:8001/upstreams/Consolidation_backend/targets \
+  -d "target=Consolidation-1.example.com:5000" \
   -d "weight=50"
 
-curl -X POST http://localhost:8001/upstreams/consolidado_backend/targets \
-  -d "target=consolidado-2.example.com:5000" \
+curl -X POST http://localhost:8001/upstreams/Consolidation_backend/targets \
+  -d "target=Consolidation-2.example.com:5000" \
   -d "weight=50"
 
 # 3️⃣ Create Service (upstream abstraction)
 curl -X POST http://localhost:8001/services \
-  -d "name=consolidado_service" \
-  -d "host=consolidado_backend" \
+  -d "name=Consolidation_service" \
+  -d "host=Consolidation_backend" \
   -d "port=5000" \
   -d "protocol=http"
 
 # 4️⃣ Create Route (URL to service mapping)
-curl -X POST http://localhost:8001/services/consolidado_service/routes \
-  -d "name=consolidado_route" \
-  -d "paths=/api/consolidado" \
+curl -X POST http://localhost:8001/services/Consolidation_service/routes \
+  -d "name=Consolidation_route" \
+  -d "paths=/api/Consolidation" \
   -d "methods=GET"
 
 # 5️⃣ Add Rate Limiting Plugin
-curl -X POST http://localhost:8001/services/consolidado_service/plugins \
+curl -X POST http://localhost:8001/services/Consolidation_service/plugins \
   -d "name=rate-limiting" \
   -d "config.minute=3000" \
   -d "config.policy=sliding_window" \
   -d "config.limit_by=ip"
 
 # 6️⃣ Add Circuit Breaker Plugin
-curl -X POST http://localhost:8001/services/consolidado_service/plugins \
+curl -X POST http://localhost:8001/services/Consolidation_service/plugins \
   -d "name=circuit-breaker" \
   -d "config.failure_threshold=50" \
   -d "config.recovery_threshold=50" \
-  -d "config.name=consolidado_cb"
+  -d "config.name=Consolidation_cb"
 
 # 7️⃣ Add Logging Plugin
-curl -X POST http://localhost:8001/services/consolidado_service/plugins \
+curl -X POST http://localhost:8001/services/Consolidation_service/plugins \
   -d "name=http-log" \
   -d "config.http_endpoint=http://log-server:8080/logs" \
   -d "config.method=POST"
 
 # 8️⃣ Add Health Check
-curl -X PATCH http://localhost:8001/upstreams/consolidado_backend \
+curl -X PATCH http://localhost:8001/upstreams/Consolidation_backend \
   -d "healthchecks.active.http_path=/api/health" \
   -d "healthchecks.active.interval=10" \
   -d "healthchecks.active.timeout=5"
@@ -1306,7 +1306,7 @@ Although the proposed final architecture is **Microserviços + Event-Driven**, o
 ```
 Estrutura: Único processo .NET 10+ rodando todas as features
 Deploy:    Docker Compose local + Kubernetes (1 réplica inicial)
-Features:  Lançamentos, Consolidado, Auditoria em contextos separados
+Features:  Lançamentos, Consolidation, Auditoria em contextos separados
 
 Vantagens:
 ├─ 🚀 Deployment: Uma única imagem Docker, um único pod Kubernetes
@@ -1322,7 +1322,7 @@ Vantagens:
 Limitações (aceitáveis no Ano 1):
 ├─ ⚠️ Escala: Sobe com CPU/memória de 1 servidor (até ~200 req/s)
 ├─ ⚠️ Deploy: Tudo sobe junto (sem rolling update de 1 feature)
-├─ ⚠️ Isolamento: Falha em Consolidado pode afetar Lançamentos
+├─ ⚠️ Isolamento: Falha em Consolidation pode afetar Lançamentos
 └─ ⚠️ Linguagem: Tudo em C# (não permite diversidade de stack)
 
 Métrica de Sucesso: Atingir 50 req/s sustentado com <30% CPU em 1 servidor
@@ -1347,7 +1347,7 @@ Estratégia de Decomposição (sem downtime):
 
 Resultado esperado (Ano 5):
 ├─ Serviço de Lançamentos (C# + Wolverine + PostgreSQL)
-├─ Serviço de Consolidado (Python FastAPI + SQLAlchemy + Compute)
+├─ Serviço de Consolidation (Python FastAPI + SQLAlchemy + Compute)
 ├─ Serviço de Auditoria (C# + Marten + Event Store)
 ├─ Serviço de Notificações (Node.js + Bull + Redis)
 ├─ RabbitMQ interconectando tudo
@@ -1399,13 +1399,13 @@ Resultado esperado (Ano 5):
 ```
 Serviço A (Lançamentos) ────┐
                             ├─→ Independentes
-Serviço B (Consolidado) ────┘
+Serviço B (Consolidation) ────┘
 
 Benefício: Escala, deploy e falhas independentes
 ```
 
 **Implementação:**
-- Cada serviço em seu próprio projeto: `Lancamentos.API` e `Consolidado.API`
+- Cada serviço em seu próprio projeto: `Entries.API` e `Consolidation.API`
 - Repositórios separados no GitHub (ou monorepo com diretorios separados)
 - Databases separados (Database per Service pattern)
 
@@ -1436,7 +1436,7 @@ Benefício: Escala, deploy e falhas independentes
 
 ```
 ESCREVER (Commands)          LER (Queries)
-└─ Lançamentos               └─ Consolidado
+└─ Lançamentos               └─ Consolidation
    ├ RegisterDebit              ├ GetDailyBalance
    ├ RegisterCredit             ├ GetTransactionHistory
    └ Otimizado para escrita     └ Otimizado para leitura rápida
@@ -1451,10 +1451,10 @@ ESCREVER (Commands)          LER (Queries)
 
 ```csharp
 // Protege contra cascata de falhas
-// Se Consolidado cair:
+// Se Consolidation cair:
 // 1. Circuit abre após N falhas
 // 2. Requisições retornam erro imediato (fail-fast)
-// 3. Lançamentos não tenta chamar Consolidado repetidamente
+// 3. Lançamentos não tenta chamar Consolidation repetidamente
 // 4. Circuit fecha quando serviço se recupera
 ```
 
@@ -1481,7 +1481,7 @@ Requisição GET /saldo/2026-05-20
 | **S**ingle Responsibility | `RegistrarLançamentoHandler`, `CalcularSaldoHandler` - cada classe uma responsabilidade |
 | **O**pen/Closed | Handlers herdam de `ICommandHandler<T>` - extensível sem modificação |
 | **L**iskov Substitution | Todos os handlers respeitam o contrato |
-| **I**nterface Segregation | Interfaces pequenas e específicas (`ILançamentoRepository`, `IConsolidadoService`) |
+| **I**nterface Segregation | Interfaces pequenas e específicas (`ILançamentoRepository`, `IConsolidationservice`) |
 | **D**ependency Inversion | Injeção de dependências via DI Container do ASP.NET Core |
 
 ---
@@ -1509,7 +1509,7 @@ Requisição GET /saldo/2026-05-20
 │  └─ Repository Pattern (Ardalis.Specification)
 │
 ├─ Outbox Pattern (implementação manual)
-│  ├─ OutboxMessage entity (tabela lancamentos.outbox_messages)
+│  ├─ OutboxMessage entity (tabela Entries.outbox_messages)
 │  ├─ RegistrarLancamentoCommandHandler — transação atômica (lancamento + outbox)
 │  ├─ OutboxRelayService (BackgroundService — polling 5s, batch 50)
 │  │  └─ Polly ResiliencePipeline: retry 3× exponencial + jitter
@@ -1517,9 +1517,9 @@ Requisição GET /saldo/2026-05-20
 │     └─ Conexão única reutilizável + IChannel por publicação
 │
 ├─ Message Bus
-│  └─ RabbitMQ.Client direto (consumer no Consolidado.Worker)
-│     ├─ Topic exchange: lancamentos.events
-│     ├─ Queue: fincontrol.consolidado.lancamento-registrado
+│  └─ RabbitMQ.Client direto (consumer no Consolidation.Worker)
+│     ├─ Topic exchange: Entries.events
+│     ├─ Queue: fincontrol.Consolidation.lancamento-registrado
 │     ├─ prefetchCount: 10, autoAck: false
 │     └─ Reconexão exponencial (5s → 60s)
 │
@@ -1530,7 +1530,7 @@ Requisição GET /saldo/2026-05-20
 │  │  ├─ SETNX (StringSetAsync When.NotExists)
 │  │  ├─ 5 tentativas × 100ms de espera
 │  │  └─ Release atômico via Lua (garante que só o dono libera)
-│  └─ Chave de cache: saldo:consolidado:{yyyy-MM-dd}, TTL 30 dias
+│  └─ Chave de cache: saldo:Consolidation:{yyyy-MM-dd}, TTL 30 dias
 │
 ├─ Resilience
 │  └─ Polly v8 (ResiliencePipelineBuilder)
@@ -1567,9 +1567,9 @@ Requisição GET /saldo/2026-05-20
 │  ├─ FluentAssertions (asserts legíveis)
 │  ├─ Bogus (geradores de dados — Faker<T>)
 │  └─ NBomber 5.5.0 (stress test manual — execução via `dotnet run`)
-│     ├─ ConsolidadosScenario: ramp 20s → 50 req/s sustained → ramp-down 10s
-│     ├─ LancamentosScenario:  ramp 20s → 10 req/s sustained → ramp-down 10s
-│     ├─ Thresholds: Consolidado p95 < 500ms | Lançamentos p95 < 1000ms | erro < 5%
+│     ├─ ConsolidationsScenario: ramp 20s → 50 req/s sustained → ramp-down 10s
+│     ├─ EntriesScenario:  ramp 20s → 10 req/s sustained → ramp-down 10s
+│     ├─ Thresholds: Consolidation p95 < 500ms | Lançamentos p95 < 1000ms | erro < 5%
 │     └─ Relatórios HTML + Markdown em stress-reports/ (não versionado)
 │
 └─ Observability
@@ -1586,12 +1586,12 @@ WAF & Firewall:      ModSecurity 3.0+ (OWASP Top 10 protection)
 API Gateway:         Kong 3.8
                      ├─ jwt plugin: valida RS256 com chave pública do Keycloak
                      ├─ request-transformer: injeta X-Subscription-Key no upstream
-                     ├─ proxy-cache: cache GET por 30s (Consolidado)
-                     └─ rate-limiting: 300 req/min (Lancamentos), 55 req/s (Consolidado)
+                     ├─ proxy-cache: cache GET por 30s (Consolidation)
+                     └─ rate-limiting: 300 req/min (Entries), 55 req/s (Consolidation)
 Database:            PostgreSQL 17 (Alpine)
 Cache:               Redis 7.4 Alpine (StackExchange.Redis)
 Message Bus:         RabbitMQ 3.13 Management Alpine
-                     └─ Exchange: lancamentos.events (topic, durable)
+                     └─ Exchange: Entries.events (topic, durable)
 Secrets Management:  HashiCorp Vault 1.18 (KV v2, dev mode)
 Identity Provider:   Keycloak latest (SSO, OAuth2, OIDC, realm fincontrol)
 Observability:       OpenTelemetry + prometheus-net + Serilog + Jaeger + Loki
@@ -1619,7 +1619,7 @@ CI/CD:               GitHub Actions
 ### Pacotes utilizados (net10.0)
 
 ```xml
-<!-- Lancamentos.Core / Consolidado.Core -->
+<!-- Entries.Core / Consolidation.Core -->
 <PackageReference Include="WolverineFx" />
 <PackageReference Include="WolverineFx.Http" />
 <PackageReference Include="WolverineFx.EntityFrameworkCore" />
@@ -1648,7 +1648,7 @@ CI/CD:               GitHub Actions
 <PackageReference Include="AspNetCore.HealthChecks.Redis" />
 <PackageReference Include="AspNetCore.HealthChecks.Rabbitmq" />
 
-<!-- Consolidado.Worker (consumer RabbitMQ direto) -->
+<!-- Consolidation.Worker (consumer RabbitMQ direto) -->
 <PackageReference Include="RabbitMQ.Client" />
 <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" />
 
@@ -1706,12 +1706,12 @@ Repositories, DTOs - está espalhado por toda a aplicação!
 
 Combinado com **CQRS**, temos:
 - ✅ **Write Slices** (Lançamentos): RegistrarDebito, RegistrarCredito
-- ✅ **Read Slices** (Consolidado): ObterSaldoDiaria, ObterExtrato
+- ✅ **Read Slices** (Consolidation): ObterSaldoDiaria, ObterExtrato
 
 ```
 ✅ VERTICAL SLICING + CQRS (por Feature)
 ├─ Features
-│  ├─ Lancamentos (Write Model)
+│  ├─ Entries (Write Model)
 │  │  ├─ RegistrarDebito/
 │  │  │  ├─ RegistrarDebitoCommand.cs
 │  │  │  ├─ RegistrarDebitoHandler.cs
@@ -1727,7 +1727,7 @@ Combinado com **CQRS**, temos:
 │  │  │  ├─ CreditoResponse.cs
 │  │  │  └─ CreditoTests.cs
 │  │
-│  ├─ Consolidado (Read Model)
+│  ├─ Consolidation (Read Model)
 │  │  ├─ ObterSaldoDiaria/
 │  │  │  ├─ ObterSaldoDiariaQuery.cs
 │  │  │  ├─ ObterSaldoDiariaHandler.cs
@@ -1778,9 +1778,9 @@ architecture-backend-2026/
 ├── src/
 │   ├── Modules/
 │   │   │
-│   │   ├── Lancamentos/                         ← Módulo Write (CQRS Command side)
+│   │   ├── Entries/                         ← Módulo Write (CQRS Command side)
 │   │   │   │
-│   │   │   ├── FinControl.Lancamentos.API/      ← Entrada HTTP (Minimal APIs)
+│   │   │   ├── FinControl.Entries.API/      ← Entrada HTTP (Minimal APIs)
 │   │   │   │   ├── Configuration/
 │   │   │   │   │   ├── ApplicationModules.cs   ← Registro de todos os módulos
 │   │   │   │   │   └── BearerSecuritySchemeTransformer.cs
@@ -1788,12 +1788,12 @@ architecture-backend-2026/
 │   │   │   │   └── Program.cs                  ← Vault → Serilog → DB → JWT →
 │   │   │   │                                      SubscriptionKey → Swagger/Scalar
 │   │   │   │
-│   │   │   └── FinControl.Lancamentos.Core/    ← Domínio + Features + Persistence
+│   │   │   └── FinControl.Entries.Core/    ← Domínio + Features + Persistence
 │   │   │       ├── Context/
 │   │   │       │   ├── DbMapping/
 │   │   │       │   │   └── LancamentoDbMapping.cs   ← EF mapping + índices
-│   │   │       │   ├── LancamentosDbContext.cs       ← Global filter soft-delete
-│   │   │       │   └── LancamentosDbContextFactory.cs
+│   │   │       │   ├── EntriesDbContext.cs       ← Global filter soft-delete
+│   │   │       │   └── EntriesDbContextFactory.cs
 │   │   │       ├── Domain/
 │   │   │       │   ├── Enums/
 │   │   │       │   │   ├── ModalidadeLancamentoEnum.cs
@@ -1808,16 +1808,16 @@ architecture-backend-2026/
 │   │   │       │   │       ├── RegistrarLancamentoCommandValidator.cs ← .Must() runtime
 │   │   │       │   │       ├── RegistrarLancamentoEndpoint.cs
 │   │   │       │   │       └── RegistrarLancamentoResponse.cs
-│   │   │       │   └── LancamentosFeatureExtensions.cs
+│   │   │       │   └── EntriesFeatureExtensions.cs
 │   │   │       ├── Migrations/
 │   │   │       │   ├── 20260522154538_InitialCreate.cs
 │   │   │       │   └── 20260523093019_AddIdempotencyKey.cs ← gen_random_uuid()
 │   │   │       └── Repositories/
-│   │   │           └── LancamentosRepository.cs
+│   │   │           └── EntriesRepository.cs
 │   │   │
-│   │   └── Consolidados/                        ← Módulo Read (CQRS Query side)
+│   │   └── Consolidations/                        ← Módulo Read (CQRS Query side)
 │   │       │
-│   │       ├── FinControl.Consolidado.API/      ← Entrada HTTP (Minimal APIs)
+│   │       ├── FinControl.Consolidation.API/      ← Entrada HTTP (Minimal APIs)
 │   │       │   ├── Configuration/
 │   │       │   │   ├── ApplicationModules.cs
 │   │       │   │   └── BearerSecuritySchemeTransformer.cs
@@ -1825,26 +1825,26 @@ architecture-backend-2026/
 │   │       │   └── Program.cs                  ← Vault → Redis → JWT →
 │   │       │                                      SubscriptionKey → Scalar
 │   │       │
-│   │       ├── FinControl.Consolidado.Core/    ← Domínio + Features
+│   │       ├── FinControl.Consolidation.Core/    ← Domínio + Features
 │   │       │   ├── Domain/
 │   │       │   │   ├── Events/
 │   │       │   │   │   └── LancamentoRegistradoHandler.cs  ← Wolverine handler
-│   │       │   │   └── SaldoConsolidado.cs                 ← record(Saldo, UltimaAtualizacao)
+│   │       │   │   └── SaldoConsolidation.cs                 ← record(Saldo, UltimaAtualizacao)
 │   │       │   └── Features/
 │   │       │       ├── Commands/
 │   │       │       │   └── AtualizarSaldoConsolidao/
 │   │       │       │       ├── AtualizarSaldoConsolidaoCommand.cs   ← ValorLancamento + DataLancamento
 │   │       │       │       └── AtualizarSaldoConsolidaoCommandHandler.cs ← Lock + Cache
 │   │       │       └── Queries/
-│   │       │           └── GetSaldoConsolidado/
-│   │       │               ├── GetSaldoConsolidadoEndpoint.cs
-│   │       │               ├── GetSaldoConsolidadoQuery.cs
-│   │       │               ├── GetSaldoConsolidadoQueryHandler.cs  ← Redis lookup
-│   │       │               └── GetSaldoConsolidadoResponse.cs
+│   │       │           └── GetSaldoConsolidation/
+│   │       │               ├── GetSaldoConsolidationEndpoint.cs
+│   │       │               ├── GetSaldoConsolidationQuery.cs
+│   │       │               ├── GetSaldoConsolidationQueryHandler.cs  ← Redis lookup
+│   │       │               └── GetSaldoConsolidationResponse.cs
 │   │       │
-│   │       └── FinControl.Consolidado.Worker/  ← BackgroundService consumer
+│   │       └── FinControl.Consolidation.Worker/  ← BackgroundService consumer
 │   │           ├── LancamentoRegistradoConsumer.cs  ← RabbitMQ.Client direto
-│   │           │                                       Exchange: lancamentos.events
+│   │           │                                       Exchange: Entries.events
 │   │           │                                       Queue durable, prefetchCount: 10
 │   │           │                                       Reconexão exponencial (5s → 60s)
 │   │           └── Program.cs                  ← Vault → Redis → IConnectionMultiplexer
@@ -1904,24 +1904,24 @@ architecture-backend-2026/
 │               └── IQuery.cs
 │
 ├── src/tests/
-│   ├── FinControl.Lancamentos.Tests/          ← 48 testes
+│   ├── FinControl.Entries.Tests/          ← 48 testes
 │   │   ├── Domain/LancamentoTests.cs                       (9 testes)
 │   │   ├── Fakers/LancamentoCommandFaker.cs
 │   │   └── Features/Commands/
 │   │       ├── RegistrarLancamentoCommandHandlerTests.cs   (12 testes)
 │   │       └── RegistrarLancamentoCommandValidatorTests.cs (27 testes)
 │   │
-│   ├── FinControl.Consolidado.Tests/          ← 35 testes
-│   │   ├── Fakers/SaldoConsolidadoFaker.cs
+│   ├── FinControl.Consolidation.Tests/          ← 35 testes
+│   │   ├── Fakers/SaldoConsolidationFaker.cs
 │   │   └── Features/
 │   │       ├── Commands/AtualizarSaldoConsolidaoCommandHandlerTests.cs (9 testes)
-│   │       ├── Queries/GetSaldoConsolidadoQueryHandlerTests.cs         (15 testes)
-│   │       └── ConsolidadoRegrasDenegocioTests.cs                      (12 testes — regras funcionais)
+│   │       ├── Queries/GetSaldoConsolidationQueryHandlerTests.cs         (15 testes)
+│   │       └── ConsolidationRegrasDenegocioTests.cs                      (12 testes — regras funcionais)
 │   │
 │   └── FinControl.StressTests/                ← Teste de carga manual (NBomber)
 │       ├── Scenarios/
-│       │   ├── ConsolidadosScenario.cs        ← 50 req/s · p95 < 500ms · erro < 5%
-│       │   └── LancamentosScenario.cs         ← 10 req/s · p95 < 1000ms · erro < 5%
+│       │   ├── ConsolidationsScenario.cs        ← 50 req/s · p95 < 500ms · erro < 5%
+│       │   └── EntriesScenario.cs         ← 10 req/s · p95 < 1000ms · erro < 5%
 │       ├── Fakers/
 │       │   ├── LancamentoFaker.cs             ← Bogus — crédito/débito aleatório
 │       │   └── LancamentoRequest.cs           ← DTO espelho sem dependência do Core
@@ -1952,10 +1952,10 @@ architecture-backend-2026/
 
 3. **`Endpoints/`** - Definição de rotas (Minimal APIs)
    - Mais limpo e explícito que Controllers
-   - Fácil mapear POST /api/lancamentos → RegistrarDebitoHandler
+   - Fácil mapear POST /api/Entries → RegistrarDebitoHandler
 
 4. **`Testes/`** - Espelha a estrutura de Features
-   - `Features/RegistrarDebito/` tests → `src/Lancamentos.API/Features/RegistrarDebito/`
+   - `Features/RegistrarDebito/` tests → `src/Entries.API/Features/RegistrarDebito/`
    - Mantém testes perto do código testado
 
 ---
@@ -2018,7 +2018,7 @@ Features/
 
 **RegistrarDebitoCommand.cs:**
 ```csharp
-namespace Lancamentos.API.Features.RegistrarDebito;
+namespace Entries.API.Features.RegistrarDebito;
 
 public record RegistrarDebitoCommand(
     decimal Valor, 
@@ -2035,7 +2035,7 @@ public record DebitoResponse(
 
 **RegistrarDebitoRequest.cs:**
 ```csharp
-namespace Lancamentos.API.Features.RegistrarDebito;
+namespace Entries.API.Features.RegistrarDebito;
 
 public record DebitoRequest(
     decimal Valor,
@@ -2045,7 +2045,7 @@ public record DebitoRequest(
 
 **RegistrarDebitoValidator.cs:**
 ```csharp
-namespace Lancamentos.API.Features.RegistrarDebito;
+namespace Entries.API.Features.RegistrarDebito;
 
 public class RegistrarDebitoValidator : AbstractValidator<RegistrarDebitoCommand>
 {
@@ -2064,14 +2064,14 @@ public class RegistrarDebitoValidator : AbstractValidator<RegistrarDebitoCommand
 
 **RegistrarDebitoHandler.cs:**
 ```csharp
-namespace Lancamentos.API.Features.RegistrarDebito;
+namespace Entries.API.Features.RegistrarDebito;
 
 public class RegistrarDebitoHandler : IRequestHandler<RegistrarDebitoCommand, DebitoResponse>
 {
-    private readonly LancamentosDbContext _dbContext;
+    private readonly EntriesDbContext _dbContext;
     private readonly IPublishEndpoint _publishEndpoint;
 
-    public RegistrarDebitoHandler(LancamentosDbContext dbContext, IPublishEndpoint publishEndpoint)
+    public RegistrarDebitoHandler(EntriesDbContext dbContext, IPublishEndpoint publishEndpoint)
     {
         _dbContext = dbContext;
         _publishEndpoint = publishEndpoint;
@@ -2089,10 +2089,10 @@ public class RegistrarDebitoHandler : IRequestHandler<RegistrarDebitoCommand, De
         );
 
         // Persister no banco
-        _dbContext.Lancamentos.Add(lancamento);
+        _dbContext.Entries.Add(lancamento);
         await _dbContext.SaveChangesAsync(ct);
 
-        // Publicar evento para que Consolidado se atualize
+        // Publicar evento para que Consolidation se atualize
         await _publishEndpoint.Publish(new LancamentoRegistradoEvent
         {
             LancamentoId = lancamento.Id,
@@ -2113,7 +2113,7 @@ public class RegistrarDebitoHandler : IRequestHandler<RegistrarDebitoCommand, De
 
 **RegistrarDebitoTests.cs:**
 ```csharp
-namespace Lancamentos.Tests.Features.RegistrarDebito;
+namespace Entries.Tests.Features.RegistrarDebito;
 
 public class RegistrarDebitoHandlerTests
 {
@@ -2132,7 +2132,7 @@ public class RegistrarDebitoHandlerTests
         result.Valor.Should().Be(100m);
         result.Status.Should().Be("Registrado");
         
-        var debitoNoBD = await _dbContext.Lancamentos.FirstAsync(x => x.Id == result.Id);
+        var debitoNoBD = await _dbContext.Entries.FirstAsync(x => x.Id == result.Id);
         debitoNoBD.Tipo.Should().Be(TipoLancamento.Debito);
     }
 }
@@ -2140,15 +2140,15 @@ public class RegistrarDebitoHandlerTests
 
 ### Connect Handler to Endpoint (Minimal API)
 
-**LancamentosEndpoints.cs:**
+**EntriesEndpoints.cs:**
 ```csharp
-namespace Lancamentos.API.Endpoints;
+namespace Entries.API.Endpoints;
 
-public static class LancamentosEndpoints
+public static class EntriesEndpoints
 {
-    public static void MapLancamentosEndpoints(this WebApplication app)
+    public static void MapEntriesEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/api/lancamentos")
+        var group = app.MapGroup("/api/Entries")
             .WithName("Lançamentos")
             .WithOpenApi();
 
@@ -2169,7 +2169,7 @@ public static class LancamentosEndpoints
         var command = new RegistrarDebitoCommand(request.Valor, request.Descricao);
         var result = await context.Send(command, ct);
         
-        return Results.Created($"/api/lancamentos/{result.Id}", result);
+        return Results.Created($"/api/Entries/{result.Id}", result);
     }
 
     public static async Task<IResult> RegistrarCredito(
@@ -2180,7 +2180,7 @@ public static class LancamentosEndpoints
         var command = new RegistrarCreditoCommand(request.Valor, request.Descricao);
         var result = await context.Send(command, ct);
         
-        return Results.Created($"/api/lancamentos/{result.Id}", result);
+        return Results.Created($"/api/Entries/{result.Id}", result);
     }
 }
 ```
@@ -2223,7 +2223,7 @@ var builder = Host.CreateDefaultBuilder(args)
 var app = builder.Build();
 
 // Mapear endpoints (Minimal APIs)
-app.MapLancamentosEndpoints();
+app.MapEntriesEndpoints();
 
 await app.RunAsync();
 ```
@@ -2232,7 +2232,7 @@ await app.RunAsync();
 
 **ValidationInterceptor.cs** (Validação automática):
 ```csharp
-namespace Lancamentos.API.Shared.Middleware;
+namespace Entries.API.Shared.Middleware;
 
 // Wolverine auto-aplica interceptores com convention naming
 public class ValidationInterceptor
@@ -2259,7 +2259,7 @@ public class ValidationInterceptor
 
 **LoggingInterceptor.cs** (Logging automático + CorrelationId):
 ```csharp
-namespace Lancamentos.API.Shared.Middleware;
+namespace Entries.API.Shared.Middleware;
 
 public class LoggingInterceptor
 {
@@ -2295,7 +2295,7 @@ public class LoggingInterceptor
 
 ## Main Components
 
-### 1. Lancamentos Service (`FinControl.Lancamentos.API` + `FinControl.Lancamentos.Core`)
+### 1. Entries Service (`FinControl.Entries.API` + `FinControl.Entries.Core`)
 
 **Responsabilidades:**
 - ✅ Registrar novos lançamentos (débitos e créditos)
@@ -2303,7 +2303,7 @@ public class LoggingInterceptor
 - ✅ Verificar idempotência antes de persistir (IdempotencyKey único)
 - ✅ Persistir em PostgreSQL via EF Core (ACID)
 - ✅ Publicar evento `LancamentoRegistradoMessage` via Outbox Manual (OutboxRelayService)
-- ✅ Manter independência funcional — não conhece o Consolidado
+- ✅ Manter independência funcional — não conhece o Consolidation
 
 **Endpoints implementados:**
 ```
@@ -2312,7 +2312,7 @@ Headers obrigatórios (via Kong):
   Idempotency-Key: <uuid-v4>  ← gerado pelo cliente
   (X-Subscription-Key é injetado pelo Kong — nunca enviado pelo cliente)
 
-POST /lancamentos/registrar   (via Kong: POST http://localhost:8000/lancamentos/registrar)
+POST /Entries/registrar   (via Kong: POST http://localhost:8000/Entries/registrar)
   Body: {
     "modalidade": "Venda" | "Devolucao" | "Suprimento" | "Sangria" |
                   "PagamentoFornecedor" | "RecebimentoDivida" | "Outros",
@@ -2330,9 +2330,9 @@ POST /lancamentos/registrar   (via Kong: POST http://localhost:8000/lancamentos/
   Response 403: subscription-key inválida
 ```
 
-**Schema PostgreSQL (schema: lancamentos):**
+**Schema PostgreSQL (schema: Entries):**
 ```sql
-CREATE TABLE lancamentos.lancamentos (
+CREATE TABLE Entries.Entries (
   id                BIGSERIAL PRIMARY KEY,
   navigation_id     UUID NOT NULL DEFAULT gen_random_uuid(),
   idempotency_key   UUID NOT NULL,
@@ -2347,25 +2347,25 @@ CREATE TABLE lancamentos.lancamentos (
 );
 
 CREATE UNIQUE INDEX idx_lancamento_idempotency_key
-  ON lancamentos.lancamentos (idempotency_key);
+  ON Entries.Entries (idempotency_key);
 CREATE INDEX idx_lancamento_data
-  ON lancamentos.lancamentos (data_lancamento DESC);
+  ON Entries.Entries (data_lancamento DESC);
 ```
 
 ---
 
-### 2. Consolidado Service — duas camadas
+### 2. Consolidation Service — duas camadas
 
-#### 2a. `FinControl.Consolidado.API` (leitura)
+#### 2a. `FinControl.Consolidation.API` (leitura)
 
 **Responsabilidades:**
-- ✅ Servir saldo consolidado por data via Redis (<5ms hit)
+- ✅ Servir saldo Consolidation por data via Redis (<5ms hit)
 - ✅ Autenticado com Keycloak + SubscriptionKeyMiddleware
 
 **Endpoint implementado:**
 ```
-GET /consolidados/saldo?data-lancamento=yyyy-MM-dd
-  (via Kong: GET http://localhost:8000/consolidados/saldo?data-lancamento=2026-05-23)
+GET /Consolidations/saldo?data-lancamento=yyyy-MM-dd
+  (via Kong: GET http://localhost:8000/Consolidations/saldo?data-lancamento=2026-05-23)
   Response 200: {
     "data": "2026-05-23",
     "saldo": 125000,           ← em centavos (long)
@@ -2376,20 +2376,20 @@ GET /consolidados/saldo?data-lancamento=yyyy-MM-dd
   Response 403: subscription-key inválida
 ```
 
-#### 2b. `FinControl.Consolidado.Worker` (consumidor de eventos)
+#### 2b. `FinControl.Consolidation.Worker` (consumidor de eventos)
 
 **Responsabilidades:**
 - ✅ Consumir `LancamentoRegistradoMessage` do RabbitMQ
-- ✅ Adquirir lock distribuído por data (`lock:saldo:consolidado:{data}`)
+- ✅ Adquirir lock distribuído por data (`lock:saldo:Consolidation:{data}`)
 - ✅ Ler saldo atual do Redis, somar o valor do lançamento e persistir
 - ✅ ACK/NACK com requeue em caso de falha; NACK sem requeue para mensagem inválida
 
 **Fluxo de atualização:**
 ```
 RabbitMQ → LancamentoRegistradoConsumer
-  → AtualizarSaldoConsolidadoCommandHandler
-    → IRedisLockService.ExecuteWithLockAsync("lock:saldo:consolidado:yyyy-MM-dd")
-      → RedisCacheService.GetAsync<SaldoConsolidado>("saldo:consolidado:yyyy-MM-dd")
+  → AtualizarSaldoConsolidationCommandHandler
+    → IRedisLockService.ExecuteWithLockAsync("lock:saldo:Consolidation:yyyy-MM-dd")
+      → RedisCacheService.GetAsync<SaldoConsolidation>("saldo:Consolidation:yyyy-MM-dd")
       → novoSaldo = saldoAtual + ValorLancamento
       → RedisCacheService.SetAsync(key, novoSaldo, TTL=30 dias)
     → ACK para RabbitMQ
@@ -2397,10 +2397,10 @@ RabbitMQ → LancamentoRegistradoConsumer
 
 **Cache:**
 ```
-Chave:  saldo:consolidado:{yyyy-MM-dd}          (prefixo FinControl: no Redis)
+Chave:  saldo:Consolidation:{yyyy-MM-dd}          (prefixo FinControl: no Redis)
 Valor:  { "saldo": 125000, "ultimaAtualizacao": "..." }
 TTL:    30 dias (renovado a cada atualização)
-Lock:   lock:saldo:consolidado:{yyyy-MM-dd}     (5 tentativas × 100ms, expiry 10s)
+Lock:   lock:saldo:Consolidation:{yyyy-MM-dd}     (5 tentativas × 100ms, expiry 10s)
 ```
 
 > Não existe banco de dados de consolidação — o Redis é a única fonte de leitura.
@@ -2429,12 +2429,12 @@ public record LancamentoRegistradoMessage(
 
 **Topologia RabbitMQ:**
 ```
-Exchange: lancamentos.events   (topic, durable)
+Exchange: Entries.events   (topic, durable)
   └── Binding: lancamento.criado
-       └── Queue: fincontrol.consolidado.lancamento-registrado (durable)
+       └── Queue: fincontrol.Consolidation.lancamento-registrado (durable)
 ```
 
-**Padrão Outbox implementado (Lancamentos — transação atômica):**
+**Padrão Outbox implementado (Entries — transação atômica):**
 ```csharp
 // RegistrarLancamentoCommandHandler.cs — garante atomicidade entre lançamento e outbox
 var tx = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -2449,7 +2449,7 @@ try
     {
         MessageType = nameof(LancamentoRegistradoMessage),
         Payload     = JsonSerializer.Serialize(evento, JsonOptions),
-        Exchange    = "lancamentos.events",
+        Exchange    = "Entries.events",
         RoutingKey  = "lancamento.criado",
         CreatedAt   = DateTimeOffset.UtcNow
     });
@@ -2461,15 +2461,15 @@ catch { await tx.RollbackAsync(cancellationToken); throw; }
 
 **OutboxRelayService — relay assíncrono com Polly:**
 ```csharp
-// FinControl.Lancamentos.Core/Outbox/OutboxRelayService.cs
+// FinControl.Entries.Core/Outbox/OutboxRelayService.cs
 // BackgroundService com polling a cada 5s, batch de 50 mensagens
 // Retry: 3× com backoff exponencial + jitter (Polly ResiliencePipeline)
 // Se falhar após 3 tentativas: incrementa RetryCount + LastError na tabela
 ```
 
-**Tabela outbox_messages (schema: lancamentos):**
+**Tabela outbox_messages (schema: Entries):**
 ```sql
-CREATE TABLE lancamentos.outbox_messages (
+CREATE TABLE Entries.outbox_messages (
   id           BIGSERIAL PRIMARY KEY,
   message_type VARCHAR(200) NOT NULL,
   payload      TEXT NOT NULL,
@@ -2481,7 +2481,7 @@ CREATE TABLE lancamentos.outbox_messages (
   last_error   VARCHAR(2000)
 );
 CREATE INDEX idx_outbox_messages_delivered_at
-  ON lancamentos.outbox_messages (delivered_at);
+  ON Entries.outbox_messages (delivered_at);
 ```
 
 ---
@@ -2493,7 +2493,7 @@ CREATE INDEX idx_outbox_messages_delivered_at
 ```
 Cliente HTTP
     │
-    ├─→ POST /lancamentos/registrar
+    ├─→ POST /Entries/registrar
     │   Authorization: Bearer <JWT Keycloak>
     │   Idempotency-Key: <uuid-v4>
     │   Body: { "modalidade": "Venda", "valor": 15000, "dataLancamento": "..." }
@@ -2519,8 +2519,8 @@ RegistrarLancamentoCommandHandler
     │
     ├─→ Verifica idempotência (SELECT por IdempotencyKey) → 409 se já existe
     ├─→ BEGIN TRANSACTION (PostgreSQL)
-    │   ├─→ INSERT lancamentos.lancamentos (persiste lançamento)
-    │   └─→ INSERT lancamentos.outbox_messages (persiste OutboxMessage)
+    │   ├─→ INSERT Entries.Entries (persiste lançamento)
+    │   └─→ INSERT Entries.outbox_messages (persiste OutboxMessage)
     │       Payload = LancamentoRegistradoMessage serializado
     └─→ COMMIT
     │
@@ -2535,19 +2535,19 @@ OutboxRelayService (BackgroundService — polling 5s)
     ├─→ Para cada mensagem:
     │   ├─→ [Polly] Retry 3× exponencial + jitter
     │   ├─→ RabbitMqPublisher.PublishRawAsync()
-    │   │   → Exchange: lancamentos.events, RoutingKey: lancamento.criado
+    │   │   → Exchange: Entries.events, RoutingKey: lancamento.criado
     │   └─→ UPDATE outbox_messages SET delivered_at = NOW()
     │
     ▼
-RabbitMQ (Queue: fincontrol.consolidado.lancamento-registrado)
+RabbitMQ (Queue: fincontrol.Consolidation.lancamento-registrado)
     │
     ▼
-LancamentoRegistradoConsumer (Consolidado.Worker)
+LancamentoRegistradoConsumer (Consolidation.Worker)
     │
-    ├─→ Adquire lock distribuído Redis (lock:saldo:consolidado:{data})
+    ├─→ Adquire lock distribuído Redis (lock:saldo:Consolidation:{data})
     ├─→ Lê saldo atual do Redis
     ├─→ Incrementa saldo com valor do lançamento
-    └─→ SET Redis: saldo:consolidado:{data} (TTL 30 dias)
+    └─→ SET Redis: saldo:Consolidation:{data} (TTL 30 dias)
 ```
 
 ---
@@ -2557,7 +2557,7 @@ LancamentoRegistradoConsumer (Consolidado.Worker)
 ```
 Cliente HTTP
     │
-    ├─→ GET /consolidados/saldo?data-lancamento=2026-05-20
+    ├─→ GET /Consolidations/saldo?data-lancamento=2026-05-20
     │   Authorization: Bearer <JWT Keycloak>
     │
     ▼
@@ -2570,14 +2570,14 @@ Kong API Gateway (porta 8000)
     │
     ▼ upstream: host.docker.internal:5260
     │
-GetSaldoConsolidadoEndpoint (Wolverine HTTP)
+GetSaldoConsolidationEndpoint (Wolverine HTTP)
     │
     ├─→ SubscriptionKeyMiddleware: valida X-Subscription-Key
     │
     ▼
-GetSaldoConsolidadoQueryHandler
+GetSaldoConsolidationQueryHandler
     │
-    ├─→ Redis GET saldo:consolidado:{data}
+    ├─→ Redis GET saldo:Consolidation:{data}
     │
     ├─→ HIT: Retorna imediatamente (<5ms)
     │
@@ -2610,7 +2610,7 @@ API Gateway (Rate Limiter)
         └─→ Rejeita ~2-3 req/s (5% loss - dentro do SLA)
         │
         ▼
-Consolidado Service
+Consolidation Service
         │
         ├─→ Consulta Redis Cache
         │   └─→ HIT RATE: ~95% (dados não mudam constantemente)
@@ -2632,7 +2632,7 @@ Total: Baixa latência, taxa de perda controlada
 
 | Cenário | Solução |
 |---------|---------|
-| Consolidado cai | Lançamentos continua operacional; fila persiste eventos |
+| Consolidation cai | Lançamentos continua operacional; fila persiste eventos |
 | Banco cai | Circuit breaker abre; falha fast; dados em fila aguardam |
 | Cache vazio | Fallback para consulta direto no BD (mais lento mas funcional) |
 | Fila cheia | Backpressure; clientes recebem 503 ou entra em retry |
@@ -2661,20 +2661,20 @@ IAsyncPolicy<HttpResponseMessage> policy = Policy
 
 | Métrica | Target | Implementação |
 |---------|--------|---------------|
-| P50 GET /consolidado | <10ms | Cache Redis |
-| P95 GET /consolidado | <50ms | Replicação DB + índices |
-| P99 GET /consolidado | <200ms | Read replicas |
-| POST /lancamentos | <100ms | Async event publishing |
+| P50 GET /Consolidation | <10ms | Cache Redis |
+| P95 GET /Consolidation | <50ms | Replicação DB + índices |
+| P99 GET /Consolidation | <200ms | Read replicas |
+| POST /Entries | <100ms | Async event publishing |
 | Throughput | 50 req/s + 5% loss | Queue + Auto-scaling |
 
 **Índices PostgreSQL:**
 ```sql
-CREATE INDEX CONCURRENTLY idx_consolidado_data 
-  ON consolidados(data DESC) 
+CREATE INDEX CONCURRENTLY idx_Consolidation_data 
+  ON Consolidations(data DESC) 
   WHERE data >= CURRENT_DATE - INTERVAL '30 days';
 
 CREATE INDEX CONCURRENTLY idx_lancamento_data_tipo 
-  ON lancamentos(data_registro DESC, tipo)
+  ON Entries(data_registro DESC, tipo)
   WHERE ativo = true;
 ```
 
@@ -2720,9 +2720,9 @@ builder.Services
 
 ```csharp
 // Endpoints protegidos com .RequireAuthorization()
-app.MapPost("/lancamentos", handler).RequireAuthorization();
-app.MapGet("/lancamentos",  handler).RequireAuthorization();
-app.MapGet("/consolidado/saldo/{data}", handler).RequireAuthorization();
+app.MapPost("/Entries", handler).RequireAuthorization();
+app.MapGet("/Entries",  handler).RequireAuthorization();
+app.MapGet("/Consolidation/saldo/{data}", handler).RequireAuthorization();
 ```
 
 ### 3. SubscriptionKeyMiddleware (second layer after Kong) — implemented
@@ -2730,7 +2730,7 @@ app.MapGet("/consolidado/saldo/{data}", handler).RequireAuthorization();
 ```csharp
 // FinControl.Infrastructure/Middleware/SubscriptionKeyMiddleware.cs
 // Registro no pipeline (antes da autenticação):
-app.UseSubscriptionKeyValidation(VaultKeys.KongLancamentosSubscriptionKey);
+app.UseSubscriptionKeyValidation(VaultKeys.KongEntriesSubscriptionKey);
 
 // Comportamento:
 // - Bypassa /health, /health/ready e /metrics (sem autenticação)
@@ -2853,32 +2853,32 @@ ModSecurity bloqueia automaticamente:
 # 1. Rate Limiting (DDoS prevention)
 curl -X POST http://localhost:8001/plugins \
   -d "name=rate-limiting" \
-  -d "service_id=consolidado-service" \
+  -d "service_id=Consolidation-service" \
   -d "config.minute=3000" \
   -d "config.policy=redis"
 
 # 2. JWT Authentication
 curl -X POST http://localhost:8001/plugins \
   -d "name=jwt" \
-  -d "route_id=consolidado-route" \
+  -d "route_id=Consolidation-route" \
   -d "config.key_claim_name=kid"
 
 # 3. IP Restriction (Whitelist/Blacklist)
 curl -X POST http://localhost:8001/plugins \
   -d "name=ip-restriction" \
-  -d "service_id=consolidado-service" \
+  -d "service_id=Consolidation-service" \
   -d "config.whitelist=192.168.1.0/24,10.0.0.0/8"
 
 # 4. CORS (Validação de Origem)
 curl -X POST http://localhost:8001/plugins \
   -d "name=cors" \
-  -d "service_id=consolidado-service" \
+  -d "service_id=Consolidation-service" \
   -d "config.origins=https://seu-dominio.com"
 
 # 5. Request Size Limiter (evita uploads gigantes)
 curl -X POST http://localhost:8001/plugins \
   -d "name=request-size-limiting" \
-  -d "service_id=consolidado-service" \
+  -d "service_id=Consolidation-service" \
   -d "config.allowed_payload_size=10485760"
 ```
 
@@ -3012,7 +3012,7 @@ networks:
    ✓ Rate limit (3.000/min)?     SIM → retorna 429 ❌
    → Se OK: passa pro serviço
 
-3. Kong → Consolidado:5001
+3. Kong → Consolidation:5001
    ✓ FluentValidation OK?        NÃO → retorna 400 ❌
    ✓ EF Core SQL seguro?         SIM → executa
    → Retorna resultado ✅
@@ -3125,7 +3125,7 @@ vault kv put secret/kong \
 **Implementação real — `AddFinControlVault()` (building block):**
 
 ```csharp
-// Program.cs (Lancamentos.API e Consolidado.API)
+// Program.cs (Entries.API e Consolidation.API)
 try
 {
     builder.AddFinControlVault();  // carrega vault.settings.json + preenche IConfiguration
@@ -3150,8 +3150,8 @@ public static class VaultKeys
     public const string PostgresConnection            = "dev/postgres:connection_string";
     public const string RedisConnection               = "dev/redis:connection_string";
     public const string RabbitMqUri                   = "dev/rabbitmq:uri";
-    public const string KongLancamentosSubscriptionKey = "dev/kong:lancamentos_subscription_key";
-    public const string KongConsolidadosSubscriptionKey = "dev/kong:consolidados_subscription_key";
+    public const string KongEntriesSubscriptionKey = "dev/kong:Entries_subscription_key";
+    public const string KongConsolidationsSubscriptionKey = "dev/kong:Consolidations_subscription_key";
 }
 ```
 
@@ -3253,7 +3253,7 @@ volumes:
 # 1. Acessar http://localhost:8443
 # 2. Login: admin / admin_pass
 # 3. Criar Realm "fluxocaixa"
-# 4. Criar Client "consolidado-api"
+# 4. Criar Client "Consolidation-api"
 # 5. Gerar Client Secret
 ```
 
@@ -3270,7 +3270,7 @@ builder.Services
     .AddJwtBearer(options =>
     {
         options.Authority = "http://keycloak:8080/auth/realms/fluxocaixa";
-        options.Audience = "consolidado-api";
+        options.Audience = "Consolidation-api";
         options.RequireHttpsMetadata = false;  // dev only
         options.TokenValidationParameters = new()
         {
@@ -3461,14 +3461,14 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'consolidado-api'
+  - job_name: 'Consolidation-api'
     static_configs:
-      - targets: ['consolidado:5001']
+      - targets: ['Consolidation:5001']
     metrics_path: '/metrics'
 
-  - job_name: 'lancamentos-api'
+  - job_name: 'Entries-api'
     static_configs:
-      - targets: ['lancamentos:5002']
+      - targets: ['Entries:5002']
     metrics_path: '/metrics'
 
   - job_name: 'kong'
@@ -3571,7 +3571,7 @@ Grafana: 11.1.0 (pinado — versões 12+ têm breaking changes no provisioning)
 
 ---
 
-### Phase 2: Lancamentos Service (Week 2)
+### Phase 2: Entries Service (Week 2)
 
 - [ ] Domain model (Aggregate Lancamento)
 - [ ] Repository pattern + EF Core DbContext
@@ -3589,20 +3589,20 @@ Grafana: 11.1.0 (pinado — versões 12+ têm breaking changes no provisioning)
 
 ---
 
-### Phase 3: Consolidado Service (Week 2-3)
+### Phase 3: Consolidation Service (Week 2-3)
 
-- [ ] Domain model (Aggregate Consolidado)
+- [ ] Domain model (Aggregate Consolidation)
 - [x] Event consumer (RabbitMQ.Client direto — LancamentoRegistradoConsumer)
 - [ ] Cache layer (Redis)
 - [ ] Controllers (GET com cache)
 - [ ] Queries (CQRS)
-- [ ] Kong routing para Consolidado Service com rate limiting
-- [ ] Kong circuit breaker se Consolidado cair
+- [ ] Kong routing para Consolidation Service com rate limiting
+- [ ] Kong circuit breaker se Consolidation cair
 - [ ] Unit tests
 - [ ] Integration tests com Event bus
 
 **Deliverables:**
-- API de Consolidado 100% funcional
+- API de Consolidation 100% funcional
 - Cache Redis integrado
 - Event driven updates
 - Kong configured: 50 req/s distribuídos entre instâncias
@@ -3645,7 +3645,7 @@ Grafana: 11.1.0 (pinado — versões 12+ têm breaking changes no provisioning)
 
 ### Phase 6: Deploy & Kubernetes (Week 5)
 
-- [ ] Docker images otimizadas (Consolidado, Lançamentos, Kong)
+- [ ] Docker images otimizadas (Consolidation, Lançamentos, Kong)
 - [ ] Manifests Kubernetes (Deployments, Services, ConfigMaps)
 - [ ] Kong Ingress Controller setup (para K8s)
 - [ ] Helm charts (Kong + Aplicações)
@@ -3691,7 +3691,7 @@ Reuse               Handlers reused ❌          Each slice complete ✅
 ╔═══════════════════════════════════════════════════════╗
 ║      ARCHITECTURAL IMPACT IN NUMBERS                 ║
 ╠═══════════════════════════════════════════════════════╣
-║ 50 req/s (Consolidado - Read heavy)                  ║
+║ 50 req/s (Consolidation - Read heavy)                  ║
 │   └─ With Redis cache: 95% hit rate                   ║
 │      └─ Reduce DB: 50 → 2.5 req/s (-95%)            ║
 │      └─ DB CPU: 70% → 15% (-75%)                    ║
@@ -3701,8 +3701,8 @@ Reuse               Handlers reused ❌          Each slice complete ✅
 │   ✅ 0.2 req/s write (200 transactions/day)          ║
 │   ✅ 99.6% read requests                             ║
 │   ✅ CQRS: Separate models (perfect!)                ║
-│   ✅ 2 Consolidado servers (25 req/s each)           ║
-│   ✅ 1 Lancamentos server (0.1 req/s each)           ║
+│   ✅ 2 Consolidation servers (25 req/s each)           ║
+│   ✅ 1 Entries server (0.1 req/s each)           ║
 │                                                       ║
 ║ 10-year growth (50 → 176 req/s):                     ║
 │   Y1: 2 servers × 25 req/s = 42% CPU  ✅            ║
@@ -3780,10 +3780,10 @@ Suporta 50 req/s?        ⚠️  Com esforço      ✅ Nativo
 4. Kong routing + rate limiting
 5. Testes de ponta a ponta (E2E)
 
-**Semana 2-3: Feature de Consolidado (Leitura)**
-1. Implementar `ObterConsolidadoDiaQuery` com cache Redis
+**Semana 2-3: Feature de Consolidation (Leitura)**
+1. Implementar `ObterConsolidationDiaQuery` com cache Redis
 2. Consumer de `LancamentoRegistradoEvent` (invalidação)
-3. Kong rate limiting para consolidado (50 req/s)
+3. Kong rate limiting para Consolidation (50 req/s)
 4. Write-through cache strategy
 5. Testes de carga inicial
 
@@ -3807,15 +3807,15 @@ Suporta 50 req/s?        ⚠️  Com esforço      ✅ Nativo
 |--------|-----------|--------|
 | 1 | Docker Compose + Projeto setup | 📌 |
 | 2 | Lançamentos funcional + Kong | 🚀 |
-| 3 | Consolidado funcional + Cache | 🎯 |
+| 3 | Consolidation funcional + Cache | 🎯 |
 | 4 | 50 req/s validado + Resiliência | ✅ |
 | 5 | Deploy + Documentação completa | 🏁 |
 
 ### Acceptance Criteria
 
 - ✅ Lançamentos recebe/processa 0.2 req/s (200 lançamentos/dia)
-- ✅ Consolidado processa 50 req/s com 95% cache hit
-- ✅ P99 latência: Lançamentos <200ms, Consolidado <5ms (com cache)
+- ✅ Consolidation processa 50 req/s com 95% cache hit
+- ✅ P99 latência: Lançamentos <200ms, Consolidation <5ms (com cache)
 - ✅ Zero perda de eventos (Outbox Pattern)
 - ✅ Crescimento 10 anos sem redesign (50 → 176 req/s)
 - ✅ Testes automatizados (>80% cobertura)
@@ -3847,10 +3847,10 @@ Suporta 50 req/s?        ⚠️  Com esforço      ✅ Nativo
 ║  └───────────────────────────────────────────────────────────────────────────┘  ║
 ║                               │                       │                          ║
 ║                    ┌──────────▼──────────┐  ┌────────▼───────────┐             ║
-║                    │  LANCAMENTOS API     │  │  CONSOLIDADO API   │             ║
+║                    │  Entries API     │  │  Consolidation API   │             ║
 ║                    │       (:5083)        │  │      (:5260)       │             ║
 ║                    │                      │  │                    │             ║
-║                    │  POST /lancamentos   │  │ GET /consolidados  │             ║
+║                    │  POST /Entries   │  │ GET /Consolidations  │             ║
 ║                    │       /registrar     │  │      /saldo        │             ║
 ║                    │                      │  │                    │             ║
 ║                    │  Wolverine + EF Core │  │ Wolverine + Redis  │             ║
@@ -3866,24 +3866,24 @@ Suporta 50 req/s?        ⚠️  Com esforço      ✅ Nativo
 ║                               │                                                 ║
 ║              ┌────────────────▼──────────────────────┐                         ║
 ║              │        RABBITMQ (:5672)                │                         ║
-║              │  Exchange: lancamentos.events (topic)  │                         ║
-║              │  Queue: fincontrol.consolidado.*       │                         ║
+║              │  Exchange: Entries.events (topic)  │                         ║
+║              │  Queue: fincontrol.Consolidation.*       │                         ║
 ║              └────────────────┬──────────────────────┘                         ║
 ║                               │                                                 ║
 ║                    ┌──────────▼──────────┐                                      ║
-║                    │  CONSOLIDADO WORKER  │                                      ║
+║                    │  Consolidation WORKER  │                                      ║
 ║                    │                      │                                      ║
 ║                    │  RabbitMQ Consumer   │                                      ║
 ║                    │  Redis Lock (Lua)    │──────────► REDIS (:6379)             ║
-║                    │  Atualiza saldo      │            saldo:consolidado:{dt}    ║
+║                    │  Atualiza saldo      │            saldo:Consolidation:{dt}    ║
 ║                    └──────────────────────┘                                      ║
 ║                                                                                  ║
 ║  ┌────────────────────────────────────────────────────────────────────────────┐ ║
 ║  │                          DADOS E SECRETS                                   │ ║
 ║  │                                                                             │ ║
 ║  │   POSTGRESQL (:5432)              VAULT (:8200)                            │ ║
-║  │   schema: lancamentos              KV v2: dev/postgres                     │ ║
-║  │   ├─ lancamentos                          dev/rabbitmq                     │ ║
+║  │   schema: Entries              KV v2: dev/postgres                     │ ║
+║  │   ├─ Entries                          dev/rabbitmq                     │ ║
 ║  │   └─ outbox_messages                      dev/redis                        │ ║
 ║  │   schema: keycloak                        dev/keycloak                     │ ║
 ║  │   schema: kong                            dev/kong                         │ ║
@@ -3911,16 +3911,16 @@ graph TB
     end
 
     subgraph APIs["Serviços de Aplicação"]
-        LancAPI["Lancamentos API :5083<br/>POST /lancamentos/registrar<br/>Wolverine · EF Core · Outbox"]
-        ConsAPI["Consolidado API :5260<br/>GET /consolidados/saldo<br/>Wolverine · Redis"]
-        ConsWorker["Consolidado Worker<br/>RabbitMQ Consumer<br/>Redis Lock + Write"]
+        LancAPI["Entries API :5083<br/>POST /Entries/registrar<br/>Wolverine · EF Core · Outbox"]
+        ConsAPI["Consolidation API :5260<br/>GET /Consolidations/saldo<br/>Wolverine · Redis"]
+        ConsWorker["Consolidation Worker<br/>RabbitMQ Consumer<br/>Redis Lock + Write"]
         OutboxRelay["OutboxRelayService<br/>BackgroundService<br/>Polly Retry 3×"]
     end
 
     subgraph Infra["Infraestrutura"]
-        Postgres[("PostgreSQL :5432<br/>lancamentos<br/>outbox_messages")]
-        Redis[("Redis :6379<br/>saldo:consolidado:<br/>{yyyy-MM-dd}")]
-        RabbitMQ["RabbitMQ :5672<br/>lancamentos.events<br/>topic exchange"]
+        Postgres[("PostgreSQL :5432<br/>Entries<br/>outbox_messages")]
+        Redis[("Redis :6379<br/>saldo:Consolidation:<br/>{yyyy-MM-dd}")]
+        RabbitMQ["RabbitMQ :5672<br/>Entries.events<br/>topic exchange"]
         Vault["Vault :8200<br/>Secrets KV v2"]
     end
 
@@ -3987,10 +3987,10 @@ graph TB
 
 ### NFR Fulfillment Analysis
 
-**Resiliência (Lançamentos independente do Consolidado):**
+**Resiliência (Lançamentos independente do Consolidation):**
 - Lançamentos persiste em PostgreSQL + outbox_messages atomicamente
 - OutboxRelayService entrega ao RabbitMQ de forma assíncrona (worker separado)
-- Se Consolidado cair: fila RabbitMQ acumula; ao reiniciar, worker processa backlog
+- Se Consolidation cair: fila RabbitMQ acumula; ao reiniciar, worker processa backlog
 - Se RabbitMQ cair: Polly retenta 3× e registra erro; nenhum lançamento é perdido do PostgreSQL
 
 **Performance (50 req/s):**
@@ -4012,13 +4012,13 @@ graph TB
 
 ```
 Passed: 83   Failed: 0   Skipped: 0
-  FinControl.Lancamentos.Tests  →  48 testes
-  FinControl.Consolidado.Tests  →  35 testes
+  FinControl.Entries.Tests  →  48 testes
+  FinControl.Consolidation.Tests  →  35 testes
 ```
 
 ### Breakdown by Class
 
-#### FinControl.Lancamentos.Tests (48 testes)
+#### FinControl.Entries.Tests (48 testes)
 
 | Arquivo | Testes | O que cobre |
 |---------|--------|-------------|
@@ -4026,13 +4026,13 @@ Passed: 83   Failed: 0   Skipped: 0
 | `Features/Commands/RegistrarLancamentoCommandHandlerTests.cs` | 12 | Persistência no banco (InMemory EF Core); geração de `NavigationId` e `CriadoEm`; campos persistidos (Valor/Modalidade/Descricao); data padrão (hoje) vs data informada; **atomicidade Outbox** (1 `OutboxMessage` por lançamento); `Exchange`/`RoutingKey`/`MessageType` do Outbox; payload com `Valor` e `CorrelationId`; `DeliveredAt=null` após insert; múltiplos lançamentos (3 de cada) |
 | `Features/Commands/RegistrarLancamentoCommandValidatorTests.cs` | 27 | Vendas com valor positivo (Theory×2); débitos com valor negativo (Theory×4); Outros exige `Descricao`; modalidade inválida; valor excede máximo (R$10M); valor positivo para débito (Theory×4); valor negativo para crédito (Theory×2); Outros sem descrição; descrição >500 chars; data >1 dia no futuro; data >1 ano no passado; `UsuarioId` vazio/curto; `UsuarioNome` vazio/>200 chars; e-mail inválido/vazio; `IdempotencyKey=Empty`; `CorrelationId=Empty` |
 
-#### FinControl.Consolidado.Tests (35 testes)
+#### FinControl.Consolidation.Tests (35 testes)
 
 | Arquivo | Testes | O que cobre |
 |---------|--------|-------------|
 | `Features/Commands/AtualizarSaldoConsolidaoCommandHandlerTests.cs` | 9 | Saldo inicial (cache vazio→zera antes de somar); acumulação sobre saldo existente; decrementação (saldo pode ficar negativo); TTL 30 dias no Redis; chave de cache usa `dataLancamento`; data retroativa atualiza a chave correta; `UltimaAtualizacao` atualizada; lock distribuído (`IRedisLockService`) invocado para cada atualização |
-| `Features/Queries/GetSaldoConsolidadoQueryHandlerTests.cs` | 15 | Saldo acumulado (`saldo:consolidado:acumulado`); saldo por data específica (cache hit); fallback para dias anteriores (até 30 dias); propagação do saldo encontrado para a data requisitada; TTL de 30 dias na propagação; limite exato de 31 chamadas no fallback; parada antecipada quando saldo encontrado; saldo zero quando nenhum dado em 30 dias; conversão centavos→decimal; saldo negativo; `UltimaAtualizacao` retornada |
-| `Features/ConsolidadoRegrasDenegocioTests.cs` | 12 | **Testes funcionais end-to-end** (Command + Query com `CacheEmMemoria`): zero sem lançamentos (acumulado e por data); crédito aumenta saldo; múltiplos créditos acumulam; débito reduz saldo; débitos > créditos = saldo negativo; saldo acumulado reflete todos os lançamentos; consultas independentes (acumulado vs. diário); consulta por data específica; fallback para dia anterior sem lançamentos; lançamento retroativo; precisão monetária centavos→reais |
+| `Features/Queries/GetSaldoConsolidationQueryHandlerTests.cs` | 15 | Saldo acumulado (`saldo:Consolidation:acumulado`); saldo por data específica (cache hit); fallback para dias anteriores (até 30 dias); propagação do saldo encontrado para a data requisitada; TTL de 30 dias na propagação; limite exato de 31 chamadas no fallback; parada antecipada quando saldo encontrado; saldo zero quando nenhum dado em 30 dias; conversão centavos→decimal; saldo negativo; `UltimaAtualizacao` retornada |
+| `Features/ConsolidationRegrasDenegocioTests.cs` | 12 | **Testes funcionais end-to-end** (Command + Query com `CacheEmMemoria`): zero sem lançamentos (acumulado e por data); crédito aumenta saldo; múltiplos créditos acumulam; débito reduz saldo; débitos > créditos = saldo negativo; saldo acumulado reflete todos os lançamentos; consultas independentes (acumulado vs. diário); consulta por data específica; fallback para dia anterior sem lançamentos; lançamento retroativo; precisão monetária centavos→reais |
 
 ### What is Covered
 
@@ -4041,7 +4041,7 @@ Passed: 83   Failed: 0   Skipped: 0
 - **Fluxo principal de escrita**: `RegistrarLancamentoCommandHandler` — do request ao banco + outbox
 - **Atomicidade Outbox**: garantia de que cada lançamento gera exatamente 1 `OutboxMessage` na mesma transação
 - **Contrato do Outbox**: exchange, routing key, message type e payload validados
-- **Fluxo principal de leitura**: `GetSaldoConsolidadoQueryHandler` — resolução de chave + leitura do Redis
+- **Fluxo principal de leitura**: `GetSaldoConsolidationQueryHandler` — resolução de chave + leitura do Redis
 - **Acumulação de saldo**: `AtualizarSaldoConsolidaoCommandHandler` — cálculo incremental com lock distribuído
 
 ### Coverage Gaps
@@ -4134,3 +4134,4 @@ Passed: 83   Failed: 0   Skipped: 0
 **Version:** 3.1  
 **Last Updated:** May 2026  
 **Status:** ✅ Production Implementation — 83 tests passing, zero failures; NBomber stress test implemented
+

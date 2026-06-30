@@ -1,4 +1,4 @@
-# FinControl — Cash Flow Control System
+﻿# FinControl — Cash Flow Control System
 
 **Software Architect Challenge 2026 — v3.0**  
 ASP.NET Core 10 | Wolverine 5.39 | Vertical Slice + CQRS + Event-Driven
@@ -23,11 +23,11 @@ The system consists of two independent services:
 
 | Service | Responsibility | Port |
 |---|---|---|
-| **Transactions.API** | Registration of debits and credits (write) | `5083` |
-| **Consolidated.API** | Query of consolidated daily balance (read) | `5260` |
-| **Consolidated.Worker** | Asynchronous processing of transaction events | — |
+| **Entries.API** | Registration of debits and credits (write) | `5083` |
+| **Consolidation.API** | Query of Consolidation daily balance (read) | `5260` |
+| **Consolidation.Worker** | Asynchronous processing of transaction events | — |
 
-The two services are decoupled via RabbitMQ: `Transactions.API` publishes events; `Consolidated.Worker` consumes and updates Redis. Thus, the failure of the consolidated service does not affect the transactions service.
+The two services are decoupled via RabbitMQ: `Entries.API` publishes events; `Consolidation.Worker` consumes and updates Redis. Thus, the failure of the Consolidation service does not affect the Entries service.
 
 ---
 
@@ -60,8 +60,8 @@ Services launched:
 | Grafana | `http://localhost:3000` |
 | Jaeger UI | `http://localhost:16686` |
 | Prometheus | `http://localhost:9090` |
-| Scalar (Transactions) | `http://localhost:5083/scalar/v1` |
-| Scalar (Consolidated) | `http://localhost:5260/scalar/v1` |
+| Scalar (Entries) | `http://localhost:5083/scalar/v1` |
+| Scalar (Consolidation) | `http://localhost:5260/scalar/v1` |
 
 ### 3. Build and Tests
 
@@ -69,14 +69,14 @@ Services launched:
 # Build the complete solution
 dotnet build
 
-# All tests (83 tests: 48 Transactions + 35 Consolidated)
+# All tests (83 tests: 48 Entries + 35 Consolidation)
 dotnet test
 
-# Transactions tests only
-dotnet test src/tests/FinControl.Lancamentos.Tests/
+# Entries tests only
+dotnet test src/tests/FinControl.Entries.Tests/
 
-# Consolidated tests only
-dotnet test src/tests/FinControl.Consolidado.Tests/
+# Consolidation tests only
+dotnet test src/tests/FinControl.Consolidation.Tests/
 ```
 
 ### 4. Stress Test (NBomber)
@@ -88,35 +88,35 @@ dotnet run --project src/tests/FinControl.StressTests/
 ```
 
 Scenarios:
-- **Consolidated**: ramp 20s → 50 req/s sustained → ramp-down 10s · p95 < 500ms · error < 5%
-- **Transactions**: ramp 20s → 10 req/s sustained → ramp-down 10s · p95 < 1000ms · error < 5%
+- **Consolidation**: ramp 20s → 50 req/s sustained → ramp-down 10s · p95 < 500ms · error < 5%
+- **Entries**: ramp 20s → 10 req/s sustained → ramp-down 10s · p95 < 1000ms · error < 5%
 
 HTML and Markdown reports are generated in `stress-reports/` (not versioned).
 
 ### 5. Running the APIs (local development)
 
 ```bash
-# Transactions API (port 5083)
-dotnet run --project src/Modules/Lancamentos/FinControl.Lancamentos.API/FinControl.Lancamentos.API.csproj
+# Entries API (port 5083)
+dotnet run --project src/Modules/Entries/FinControl.Entries.API/FinControl.Entries.API.csproj
 
-# Consolidated API (port 5260)
-dotnet run --project src/Modules/Consolidados/FinControl.Consolidado.API/FinControl.Consolidado.API.csproj
+# Consolidation API (port 5260)
+dotnet run --project src/Modules/Consolidations/FinControl.Consolidation.API/FinControl.Consolidation.API.csproj
 
-# Consolidated Worker
-dotnet run --project src/Modules/Consolidados/FinControl.Consolidado.Worker/FinControl.Consolidado.Worker.csproj
+# Consolidation Worker
+dotnet run --project src/Modules/Consolidations/FinControl.Consolidation.Worker/FinControl.Consolidation.Worker.csproj
 ```
 
 ---
 
 ## Endpoints
 
-### Transactions API — `POST /lancamentos/registrar`
+### Entries API — `POST /Entries/registrar`
 
 Registers a new debit or credit.
 
 **Via Kong (recommended):**
 ```
-POST http://localhost:8000/lancamentos/registrar
+POST http://localhost:8000/Entries/registrar
 Authorization: Bearer <jwt-token>
 X-Subscription-Key: fc-lanc-dev-subkey-2026-abc123ef
 Content-Type: application/json
@@ -148,13 +148,13 @@ Amount in cents (`15000` = R$ 150.00)
 
 ---
 
-### Consolidated API — `GET /consolidados/saldo`
+### Consolidation API — `GET /Consolidations/saldo`
 
-Returns the consolidated balance for the day. NFR: 50 req/s with max 5% loss.
+Returns the Consolidation balance for the day. NFR: 50 req/s with max 5% loss.
 
 **Via Kong (recommended):**
 ```
-GET http://localhost:8000/consolidados/saldo?data-lancamento=2026-05-23
+GET http://localhost:8000/Consolidations/saldo?data-lancamento=2026-05-23
 Authorization: Bearer <jwt-token>
 X-Subscription-Key: fc-cons-dev-subkey-2026-xyz789ab
 ```
@@ -173,10 +173,10 @@ X-Subscription-Key: fc-cons-dev-subkey-2026-xyz789ab
 ### Health Checks (without passing through Kong)
 
 ```
-GET http://localhost:5083/health        # Transactions liveness
-GET http://localhost:5083/health/ready  # Transactions readiness
-GET http://localhost:5260/health        # Consolidated liveness
-GET http://localhost:5260/health/ready  # Consolidated readiness
+GET http://localhost:5083/health        # Entries liveness
+GET http://localhost:5083/health/ready  # Entries readiness
+GET http://localhost:5260/health        # Consolidation liveness
+GET http://localhost:5260/health/ready  # Consolidation readiness
 ```
 
 ---
@@ -223,16 +223,16 @@ src/
 │   ├── FinControl.Infrastructure/     # Cross-cutting: Vault, Redis, RabbitMQ, Observability, Polly
 │   └── FinControl.Auth/               # Keycloak JWT Bearer (AddFinControlKeycloakAuth)
 ├── Modules/
-│   ├── Lancamentos/
-│   │   ├── FinControl.Lancamentos.Core/   # Domain + Features (Vertical Slice) + Outbox + Migrations
-│   │   └── FinControl.Lancamentos.API/    # Host + Middleware + Scalar UI
-│   └── Consolidados/
-│       ├── FinControl.Consolidado.Core/   # Domain + Features (Vertical Slice)
-│       ├── FinControl.Consolidado.API/    # Host + Middleware + Scalar UI
-│       └── FinControl.Consolidado.Worker/ # RabbitMQ Consumer (exponential reconnect 5s→60s)
+│   ├── Entries/
+│   │   ├── FinControl.Entries.Core/   # Domain + Features (Vertical Slice) + Outbox + Migrations
+│   │   └── FinControl.Entries.API/    # Host + Middleware + Scalar UI
+│   └── Consolidations/
+│       ├── FinControl.Consolidation.Core/   # Domain + Features (Vertical Slice)
+│       ├── FinControl.Consolidation.API/    # Host + Middleware + Scalar UI
+│       └── FinControl.Consolidation.Worker/ # RabbitMQ Consumer (exponential reconnect 5s→60s)
 └── tests/
-    ├── FinControl.Lancamentos.Tests/  # xUnit + Moq + Bogus — 48 tests
-    ├── FinControl.Consolidado.Tests/  # xUnit + Moq + Bogus — 35 tests
+    ├── FinControl.Entries.Tests/  # xUnit + Moq + Bogus — 48 tests
+    ├── FinControl.Consolidation.Tests/  # xUnit + Moq + Bogus — 35 tests
     └── FinControl.StressTests/        # NBomber 5.5.0 — manual execution (dotnet run)
 
 docker-init/
@@ -263,3 +263,4 @@ docker-init/
 | Unit Tests | xUnit + Moq + Bogus + FluentAssertions (83 tests) |
 | Stress Test | NBomber 5.5.0 — HTML + Markdown reports |
 | Pattern | Vertical Slice + CQRS + Event-Driven + DDD |
+

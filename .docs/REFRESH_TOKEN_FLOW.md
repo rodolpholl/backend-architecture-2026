@@ -1,4 +1,4 @@
-# Refresh Token — Flow and Responsibilities
+﻿# Refresh Token — Flow and Responsibilities
 
 > **Objective:** Document the JWT token lifecycle in FinControl, where refresh_token should be handled and how to implement the correct flow in clients.
 > **Audience:** Frontend, mobile and API integration developers
@@ -54,7 +54,7 @@ Configured in `fincontrol` realm via [keycloak-init.sh](../docker-init/keycloak/
 ┌─────────────────────────────────────────────────────────────────────┐
 │  2. NORMAL REQUEST (valid token)                                    │
 │                                                                     │
-│  Client ──GET /consolidados──► Kong                                │
+│  Client ──GET /Consolidations──► Kong                                │
 │          Authorization: Bearer <access_token>                       │
 │                                                                     │
 │  Kong validates JWT ──► forwards upstream                          │
@@ -66,7 +66,7 @@ Configured in `fincontrol` realm via [keycloak-init.sh](../docker-init/keycloak/
 ┌─────────────────────────────────────────────────────────────────────┐
 │  3. TOKEN EXPIRED — REFRESH                                         │
 │                                                                     │
-│  Client ──GET /consolidados──► Kong                                │
+│  Client ──GET /Consolidations──► Kong                                │
 │          Authorization: Bearer <expired access_token>              │
 │                                                                     │
 │  Kong ◄── 401 Unauthorized                                          │
@@ -80,7 +80,7 @@ Configured in `fincontrol` realm via [keycloak-init.sh](../docker-init/keycloak/
 │           ◄── new refresh_token  (previous one was invalidated)     │
 │                                                                     │
 │  Client stores new tokens                                          │
-│  Client ──GET /consolidados──► Kong  (retry with new access_token) │
+│  Client ──GET /Consolidations──► Kong  (retry with new access_token) │
 │  API returns ◄── 200 OK                                             │
 └─────────────────────────────────────────────────────────────────────┘
                           │
@@ -244,14 +244,14 @@ Intercept Kong's `401` and try refresh once:
 ```bash
 HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
-  "http://localhost:8000/consolidados/saldo?data-lancamento=2026-05-22")
+  "http://localhost:8000/Consolidations/saldo?data-lancamento=2026-05-22")
 
 if [ "$HTTP_STATUS" -eq "401" ]; then
   echo "Token expired — refreshing..."
   refresh_tokens
   # Retry with new token
   curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
-    "http://localhost:8000/consolidados/saldo?data-lancamento=2026-05-22"
+    "http://localhost:8000/Consolidations/saldo?data-lancamento=2026-05-22"
 fi
 ```
 
@@ -421,3 +421,4 @@ curl -s http://localhost:8081/realms/fincontrol/.well-known/openid-configuration
 **Version:** 1.0
 **Last updated:** May 2026
 **Status:** Active
+

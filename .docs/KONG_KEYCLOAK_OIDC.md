@@ -1,4 +1,4 @@
-# Kong + Keycloak — JWT RS256 Integration
+﻿# Kong + Keycloak — JWT RS256 Integration
 
 > **Objective:** Describe how Kong authenticates requests using JWT RS256 issued by Keycloak.
 > **Status:** Automatic configuration via `kong-init`
@@ -14,16 +14,16 @@ Additionally, Kong injects the `X-Subscription-Key` header automatically via `re
 ```
 Client
     |
-    | GET /consolidados/saldo  +  Authorization: Bearer <JWT RS256>
+    | GET /Consolidations/saldo  +  Authorization: Bearer <JWT RS256>
     v
 Kong Gateway (:8000)
     |-- 1. jwt plugin:               validates RS256 signature with Keycloak public key
     |-- 2. request-transformer:      injects X-Subscription-Key in upstream header
-    |-- 3. rate-limiting:            300 req/min (Lancamentos) | 55 req/s (Consolidado)
-    |-- 4. proxy-cache:              cache GET /consolidados for 30s
+    |-- 3. rate-limiting:            300 req/min (Entries) | 55 req/s (Consolidation)
+    |-- 4. proxy-cache:              cache GET /Consolidations for 30s
     |
     v (if JWT valid)
-FinControl.Lancamentos.API (:5083)  or  FinControl.Consolidado.API (:5260)
+FinControl.Entries.API (:5083)  or  FinControl.Consolidation.API (:5260)
     |
     v
 SubscriptionKeyMiddleware (second internal validation layer)
@@ -37,8 +37,8 @@ SubscriptionKeyMiddleware (second internal validation layer)
 |--------|--------|--------------|
 | `jwt` | Global | RS256; `key_claim_name = iss`; Keycloak public key registered per consumer |
 | `request-transformer` | Per service | Injects `X-Subscription-Key` upstream |
-| `rate-limiting` | Per route | 300 req/min (Lancamentos) · 55 req/s (Consolidado) |
-| `proxy-cache` | Consolidado | Cache GET for 30s; `cache-control` strategy |
+| `rate-limiting` | Per route | 300 req/min (Entries) · 55 req/s (Consolidation) |
+| `proxy-cache` | Consolidation | Cache GET for 30s; `cache-control` strategy |
 
 ---
 
@@ -46,8 +46,8 @@ SubscriptionKeyMiddleware (second internal validation layer)
 
 | Service | Internal URL (Docker) | Route path |
 |---------|----------------------|-----------|
-| `fincontrol-lancamentos` | `http://host.docker.internal:5083` | `/lancamentos` |
-| `fincontrol-consolidados` | `http://host.docker.internal:5260` | `/consolidados` |
+| `fincontrol-Entries` | `http://host.docker.internal:5083` | `/Entries` |
+| `fincontrol-Consolidations` | `http://host.docker.internal:5260` | `/Consolidations` |
 
 ---
 
@@ -120,14 +120,14 @@ TOKEN=$(curl -s -X POST \
 ### 4. Make authenticated request
 
 ```bash
-# Lancamentos
+# Entries
 curl -s -w "\nHTTP %{http_code}\n" \
-  http://localhost:8000/lancamentos/health \
+  http://localhost:8000/Entries/health \
   -H "Authorization: Bearer $TOKEN"
 
-# Consolidado
+# Consolidation
 curl -s -w "\nHTTP %{http_code}\n" \
-  "http://localhost:8000/consolidados/saldo?data-lancamento=2026-05-23" \
+  "http://localhost:8000/Consolidations/saldo?data-lancamento=2026-05-23" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -135,32 +135,32 @@ curl -s -w "\nHTTP %{http_code}\n" \
 
 ## Manual Configuration (if kong-init fails)
 
-### Create Service — Lancamentos
+### Create Service — Entries
 
 ```bash
 curl -X POST http://localhost:8001/services \
-  -d name=fincontrol-lancamentos \
+  -d name=fincontrol-Entries \
   -d url=http://host.docker.internal:5083
 ```
 
-### Create Service — Consolidado
+### Create Service — Consolidation
 
 ```bash
 curl -X POST http://localhost:8001/services \
-  -d name=fincontrol-consolidados \
+  -d name=fincontrol-Consolidations \
   -d url=http://host.docker.internal:5260
 ```
 
 ### Create Routes
 
 ```bash
-curl -X POST http://localhost:8001/services/fincontrol-lancamentos/routes \
-  -d name=lancamentos-route \
-  -d "paths[]=/lancamentos"
+curl -X POST http://localhost:8001/services/fincontrol-Entries/routes \
+  -d name=Entries-route \
+  -d "paths[]=/Entries"
 
-curl -X POST http://localhost:8001/services/fincontrol-consolidados/routes \
-  -d name=consolidados-route \
-  -d "paths[]=/consolidados"
+curl -X POST http://localhost:8001/services/fincontrol-Consolidations/routes \
+  -d name=Consolidations-route \
+  -d "paths[]=/Consolidations"
 ```
 
 ### Enable JWT Plugin
@@ -190,23 +190,23 @@ curl -X POST http://localhost:8001/consumers/fincontrol-keycloak-consumer/jwt \
 ### Enable Rate Limiting
 
 ```bash
-# Lancamentos — 300 req/min
-curl -X POST http://localhost:8001/services/fincontrol-lancamentos/plugins \
+# Entries — 300 req/min
+curl -X POST http://localhost:8001/services/fincontrol-Entries/plugins \
   -d name=rate-limiting \
   -d "config.minute=300" \
   -d "config.policy=local"
 
-# Consolidado — 55 req/s (3300 req/min)
-curl -X POST http://localhost:8001/services/fincontrol-consolidados/plugins \
+# Consolidation — 55 req/s (3300 req/min)
+curl -X POST http://localhost:8001/services/fincontrol-Consolidations/plugins \
   -d name=rate-limiting \
   -d "config.second=55" \
   -d "config.policy=local"
 ```
 
-### Enable Proxy Cache (Consolidado)
+### Enable Proxy Cache (Consolidation)
 
 ```bash
-curl -X POST http://localhost:8001/services/fincontrol-consolidados/plugins \
+curl -X POST http://localhost:8001/services/fincontrol-Consolidations/plugins \
   -d name=proxy-cache \
   -d "config.response_code[]=200" \
   -d "config.request_method[]=GET" \
@@ -243,3 +243,4 @@ curl -X POST http://localhost:8001/services/fincontrol-consolidados/plugins \
 **Version:** 3.0
 **Last updated:** May 2026
 **Status:** Active — automated configuration via kong-init
+
