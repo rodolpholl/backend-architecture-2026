@@ -1,4 +1,4 @@
-namespace FinControl.Infrastructure.Vault;
+﻿namespace FinControl.Infrastructure.Vault;
 
 /// <summary>
 /// Mapa completo de chaves do HashiCorp Vault para o sistema FinControl,
@@ -45,7 +45,7 @@ namespace FinControl.Infrastructure.Vault;
 /// ────────────────────────────────────────────────────────────────────────────
 /// SETUP VAULT CLI (ambiente dev)
 /// ────────────────────────────────────────────────────────────────────────────
-///   vault kv put secret/dev/postgres   connection_string="Host=postgres;Database=fincontrol_lancamentos;Username=fincontrol_admin;Password=..."
+///   vault kv put secret/dev/postgres   connection_string="Host=postgres;Database=fincontrol_Entries;Username=fincontrol_admin;Password=..."
 ///   vault kv put secret/dev/redis      connection_string="redis:6379,password=...,abortConnect=false"
 ///   vault kv put secret/dev/rabbitmq   uri="amqp://user:pass@rabbitmq:5672/fincontrol"
 ///   vault kv put secret/dev/grafana    loki_url="http://loki:3100" otlp_endpoint="http://jaeger:4317" prometheus_pushgateway="http://prometheus:9091"
@@ -177,18 +177,19 @@ public static class VaultKeys
 
     /// <summary>
     /// Subscription key do Kong para a API de Lançamentos.
-    /// Vault path: <c>dev/kong</c> → key <c>lancamentos_subscription_key</c>
-    /// IConfiguration: <c>kong:lancamentos_subscription_key</c>
+    /// Vault path: <c>dev/kong</c> → key <c>Entries_subscription_key</c>
+    /// IConfiguration: <c>kong:Entries_subscription_key</c>
     /// Header HTTP: <c>X-Subscription-Key</c>
     /// </summary>
-    public const string KongTransactionsSubscriptionKey = "kong:lancamentos_subscription_key";
+    public const string KongTransactionsSubscriptionKey = "kong:Entries_subscription_key";
 
     /// <summary>
-    /// Subscription key do Kong para a API de Consolidados.
-    /// Vault path: <c>dev/kong</c> → key <c>consolidados_subscription_key</c>
-    /// IConfiguration: <c>kong:consolidados_subscription_key</c>
+    /// Subscription key do Kong para a API de Consolidation.
+    /// Vault path: <c>dev/kong</c> → key <c>Consolidation_subscription_key</c>
+    /// IConfiguration: <c>kong:Consolidation_subscription_key</c>
     /// Header HTTP: <c>X-Subscription-Key</c>
     /// </summary>
-    public const string KongConsolidadosSubscriptionKey = "kong:consolidados_subscription_key";
+    public const string KongConsolidationSubscriptionKey = "kong:Consolidation_subscription_key";
 }
+
 

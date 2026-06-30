@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Net.Http.Headers;
 using NBomber.Contracts;
 using NBomber.CSharp;
@@ -9,7 +9,7 @@ namespace FinControl.StressTests.Scenarios;
 /// Cenário principal — valida o NFR de 50 req/s no endpoint de saldo consolidado.
 /// Tresholds: p95 &lt; 500ms, taxa de erro &lt; 5%
 /// </summary>
-internal static class ConsolidadosScenario
+internal static class ConsolidationScenario
 {
     public static ScenarioProps Create(string baseUrl, string token, int sustainedSeconds)
     {
@@ -19,9 +19,9 @@ internal static class ConsolidadosScenario
 
         var today = DateOnly.FromDateTime(DateTime.Today)
             .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var endpoint = $"/consolidados/saldo?transaction-date={today}";
+        var endpoint = $"/Consolidation/saldo?transaction-date={today}";
 
-        return Scenario.Create("consolidados_saldo_50rps", async ctx =>
+        return Scenario.Create("Consolidation_saldo_50rps", async ctx =>
         {
             try
             {
@@ -60,3 +60,4 @@ internal static class ConsolidadosScenario
         );
     }
 }
+

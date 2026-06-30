@@ -15,7 +15,7 @@ namespace FinControl.Infrastructure.Extensions;
 ///   - Prometheus Metrics  → exposes /metrics for scraping
 ///
 /// Usage in module's Program.cs:
-///   builder.AddFinControlObservability("fincontrol-lancamentos");
+///   builder.AddFinControlObservability("fincontrol-Entries");
 ///   app.UseFinControlObservability();
 /// </summary>
 public static class ObservabilityExtensions
@@ -90,3 +90,4 @@ public static class ObservabilityExtensions
         return endpoints;
     }
 }
+

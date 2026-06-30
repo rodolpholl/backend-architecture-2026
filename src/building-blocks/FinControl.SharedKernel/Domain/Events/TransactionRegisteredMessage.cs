@@ -1,4 +1,4 @@
-namespace FinControl.SharedKernel.Domain.Events;
+﻿namespace FinControl.SharedKernel.Domain.Events;
 
 /// <summary>
 /// Shared event contract between the Transactions and Consolidated modules.
@@ -20,7 +20,7 @@ public record TransactionRegisteredMessage(
 
 /// <summary>
 /// Transaction category enum for the event contract — values must remain in parity
-/// with FinControl.Transactions.Core.Domain.Enums.TransactionCategory.
+/// with FinControl.Entries.Core.Domain.Enums.TransactionCategory.
 /// </summary>
 public enum EventTransactionCategory
 {
@@ -32,3 +32,4 @@ public enum EventTransactionCategory
     DebtCollection = 6,
     Others = 7
 }
+

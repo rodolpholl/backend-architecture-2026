@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <!-- Wolverine: Mediator, Bus, HTTP -->
+    <PackageReference Include="WolverineFx" />
+    <PackageReference Include="WolverineFx.Http" />
+
+    <!-- OpenAPI / Swagger -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+
+    <!-- Validation -->
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\building-blocks\FinControl.Auth\FinControl.Auth.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\FinControl.Infrastructure\FinControl.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\FinControl.SharedKernel\FinControl.SharedKernel.csproj" />
+    <ProjectReference Include="..\FinControl.Consolidation.Core\FinControl.Consolidation.Core.csproj" />
+  </ItemGroup>
+
+</Project>

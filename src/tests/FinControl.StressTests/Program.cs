@@ -1,4 +1,4 @@
-using FinControl.StressTests;
+﻿using FinControl.StressTests;
 using FinControl.StressTests.Scenarios;
 using NBomber.Contracts.Stats;
 using NBomber.CSharp;
@@ -6,8 +6,8 @@ using NBomber.CSharp;
 // ─────────────────────────────────────────────────────────────────────────────
 //  FinControl — Stress Test  (NBomber)
 //
-//  Valida o NFR de 50 req/s no endpoint de saldo consolidado (GET /consolidados/saldo)
-//  e aplica carga de fundo de escrita (POST /lancamentos/registrar) em paralelo.
+//  Valida o NFR de 50 req/s no endpoint de saldo consolidado (GET /Consolidation/saldo)
+//  e aplica carga de fundo de escrita (POST /Entries/registrar) em paralelo.
 //
 //  PRÉ-REQUISITOS
 //  ──────────────
@@ -61,20 +61,21 @@ var token = await AuthHelper.FetchTokenAsync(config);
 
 Console.WriteLine();
 Console.WriteLine("  Cenários:");
-Console.WriteLine($"  • consolidados_saldo_50rps  → GET  /consolidados/saldo  → ramp 20s + {config.SustainedDurationSeconds}s @ 50 req/s");
-Console.WriteLine($"  • lancamentos_registrar_10rps → POST /lancamentos/registrar → ramp 20s + {config.SustainedDurationSeconds}s @ 10 req/s");
+Console.WriteLine($"  • Consolidation_saldo_50rps  → GET  /Consolidation/saldo  → ramp 20s + {config.SustainedDurationSeconds}s @ 50 req/s");
+Console.WriteLine($"  • Entries_registrar_10rps → POST /Entries/registrar → ramp 20s + {config.SustainedDurationSeconds}s @ 10 req/s");
 Console.WriteLine();
 Console.WriteLine("  Iniciando...");
 Console.WriteLine();
 
 // 3. Cria os dois cenários
-var consolidados = ConsolidadosScenario.Create(config.BaseUrl, token, config.SustainedDurationSeconds);
-var lancamentos  = TransactionsScenario.Create(config.BaseUrl, token, config.SustainedDurationSeconds);
+var Consolidation = ConsolidationScenario.Create(config.BaseUrl, token, config.SustainedDurationSeconds);
+var Entries  = TransactionsScenario.Create(config.BaseUrl, token, config.SustainedDurationSeconds);
 
 // 4. Executa (os cenários correm em paralelo)
 NBomberRunner
-    .RegisterScenarios(consolidados, lancamentos)
+    .RegisterScenarios(Consolidation, Entries)
     .WithReportFileName("fincontrol_stress_report")
     .WithReportFolder("stress-reports")
     .WithReportFormats(ReportFormat.Html, ReportFormat.Md)
     .Run();
+

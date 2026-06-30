@@ -115,8 +115,8 @@ GET {{keycloak_base}}/realms/{{realm}}/.well-known/openid-configuration
 
 ### ── Example: Call protected API ────────────────────────────
 # Uncomment after starting the .NET API
-# GET http://localhost:5000/api/lancamentos
+# GET http://localhost:5000/api/entries
 # Authorization: Bearer {{access_token}}
 
-# GET http://localhost:5000/api/consolidados
+# GET http://localhost:5000/api/consolidations
 # Authorization: Bearer {{access_token}}

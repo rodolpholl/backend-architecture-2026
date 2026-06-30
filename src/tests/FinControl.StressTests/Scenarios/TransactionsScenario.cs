@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+﻿using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using FinControl.StressTests.Fakers;
@@ -25,21 +25,21 @@ internal static class TransactionsScenario
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", token);
 
-        return Scenario.Create("lancamentos_registrar_10rps", async ctx =>
+        return Scenario.Create("Entries_registrar_10rps", async ctx =>
         {
             try
             {
                 var payload = JsonSerializer.Serialize(TransactionFaker.Next(), JsonOpts);
                 using var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
-                using var response = await client.PostAsync("/lancamentos/registrar", content);
+                using var response = await client.PostAsync("/Entries/registrar", content);
                 var body = await response.Content.ReadAsStringAsync();
 
                 if (response.IsSuccessStatusCode)
                     return Response.Ok();
 
                 ctx.Logger.Warning(
-                    "[FAIL] {StatusCode} {ReasonPhrase} | /lancamentos/registrar | body: {Body}",
+                    "[FAIL] {StatusCode} {ReasonPhrase} | /Entries/registrar | body: {Body}",
                     (int)response.StatusCode,
                     response.ReasonPhrase,
                     body[..Math.Min(300, body.Length)]);
@@ -48,7 +48,7 @@ internal static class TransactionsScenario
             }
             catch (Exception ex)
             {
-                ctx.Logger.Error(ex, "[FAIL] Excecao ao chamar /lancamentos/registrar");
+                ctx.Logger.Error(ex, "[FAIL] Excecao ao chamar /Entries/registrar");
                 return Response.Fail();
             }
         })
@@ -65,3 +65,4 @@ internal static class TransactionsScenario
         );
     }
 }
+

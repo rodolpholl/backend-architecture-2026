@@ -1,4 +1,4 @@
-namespace FinControl.Infrastructure.Vault;
+﻿namespace FinControl.Infrastructure.Vault;
 
 /// <summary>
 /// HashiCorp Vault configurations read from appsettings / environment variables.
@@ -33,7 +33,7 @@ public sealed class VaultOptions
     // ── Secret paths ───────────────────────────────────────────────────
     /// <summary>
     /// List of KV (v2) paths whose values will be injected into IConfiguration.
-    /// Ex: ["fincontrol/lancamentos", "fincontrol/shared"]
+    /// Ex: ["fincontrol/Entries", "fincontrol/shared"]
     /// </summary>
     public string[] SecretPaths { get; init; } = [];
 
@@ -50,3 +50,4 @@ public sealed class VaultOptions
     /// <summary>If true, failures reading Vault throw an exception during initialization.</summary>
     public bool Required { get; init; } = true;
 }
+
